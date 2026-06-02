@@ -29,6 +29,28 @@ C++ · CUDA · Python · FastAPI · pybind11 · LangGraph · ChromaDB · sentenc
 
 Built and benchmarked on HiPerGator (NVIDIA A6000) via SLURM.
 
+## Setup
+
+Create the project environment and install dependencies:
+
+```powershell
+conda create -n atlas python=3.11 -y
+conda activate atlas
+pip install -r requirements.txt
+```
+
+### Phase 1: establish ground truth
+
+Download TinyLlama-1.1B-Chat and capture the golden reference forward pass that
+the C++ engine is validated against:
+
+```powershell
+python scripts/download_weights.py
+```
+
+This writes the test oracles (`config.json`, `token_ids.npy`, `logits.npy`) to
+`reference/`. A `Paris`-topped top-5 prediction confirms the reference is sane.
+
 ## Status
 
 Early scaffolding. See `atlas-repo-structure.jsx` for the full planned repository layout

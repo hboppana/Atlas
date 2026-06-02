@@ -77,22 +77,25 @@ def main() -> None:
     print("[2/5] Loading tokenizer and model (FP32, CPU)")
     tokenizer = AutoTokenizer.from_pretrained(str(WEIGHTS_DIR))
     model = AutoModelForCausalLM.from_pretrained(
-        str(WEIGHTS_DIR), torch_dtype=torch.float32
+        str(WEIGHTS_DIR), dtype=torch.float32
     )
     model.eval()
 
-    # Pin and verify the architecture.
-    cfg = model.config
+    # Verify the architecture against the on-disk config.json rather than the
+    # live config object. The file's keys are stable across transformers
+    # versions; the live object is not (e.g. recent versions move rope_theta
+    # under a rope_parameters dict, so config.rope_theta reads back as None).
+    raw_cfg = json.loads((WEIGHTS_DIR / "config.json").read_text())
     print("[3/5] Architecture config:")
     mismatches = []
     for key, want in EXPECTED.items():
-        got = getattr(cfg, key, None)
+        got = raw_cfg.get(key)
         ok = got == want
         if not ok:
             mismatches.append((key, want, got))
         flag = "ok " if ok else "!! "
         print(f"        {flag}{key:26s} = {got}  (expected {want})")
-    head_dim = cfg.hidden_size // cfg.num_attention_heads
+    head_dim = raw_cfg["hidden_size"] // raw_cfg["num_attention_heads"]
     print(f"        .. head_dim (derived)     = {head_dim}")
     if mismatches:
         raise SystemExit(
@@ -102,7 +105,7 @@ def main() -> None:
 
     REF_DIR.mkdir(parents=True, exist_ok=True)
     # Save the pinned config the C++ engine will hardcode/parse.
-    pinned = {k: getattr(cfg, k) for k in EXPECTED}
+    pinned = {k: raw_cfg[k] for k in EXPECTED}
     pinned["head_dim"] = head_dim
     pinned["torch_dtype"] = "float32"
     pinned["model_id"] = MODEL_ID
