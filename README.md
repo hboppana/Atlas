@@ -1,6 +1,6 @@
 # Atlas
 
-An AI research assistant for scholarly publications — built from the metal up.
+An AI research assistant for scholarly publications, built from the ground up. (in progress)
 
 Atlas is a full-stack AI system where every layer is implemented from scratch, from
 hand-written CUDA inference kernels to an autonomous agent that reasons over a corpus
