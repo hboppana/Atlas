@@ -1,0 +1,26 @@
+# Atlas Python dependencies.
+# Grows phase by phase; right now it covers Phase 1 ground-truth setup only.
+
+# --- Phase 1: reference / weight tooling (scripts/download_weights.py) ---
+torch>=2.2
+transformers>=4.40
+huggingface_hub>=0.23
+safetensors>=0.4
+numpy>=1.26
+
+# --- Phase 2: serving (added later) ---
+# fastapi
+# uvicorn
+# pybind11
+
+# --- Phase 3: RAG (added later) ---
+# chromadb
+# sentence-transformers
+# pypdf
+
+# --- Phase 4: agent (added later) ---
+# langchain
+# langgraph
+
+# --- Phase 5: MCP (added later) ---
+# mcp

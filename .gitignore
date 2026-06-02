@@ -1,0 +1,23 @@
+# Model weights (downloaded by scripts/download_weights.py)
+weights/
+
+# C++ build output
+build/
+*.o
+*.obj
+*.exe
+
+# Paper corpus and processed data
+data/papers/
+data/chunks/
+
+# Environment / secrets
+.env
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Note: reference/ (golden test oracles) is intentionally NOT ignored -
+# token_ids.npy / logits.npy are small and serve as engine/tests/ fixtures.
