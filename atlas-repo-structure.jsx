@@ -102,7 +102,7 @@ const REPO = {
     {
       name: "mcp/",
       type: "dir",
-      desc: "MCP server — exposes Forge as a tool to any MCP client",
+      desc: "MCP server — exposes Atlas as a tool to any MCP client",
       phase: 5,
       children: [
         { name: "__init__.py", type: "file", desc: "" },
@@ -116,7 +116,7 @@ const REPO = {
       type: "dir",
       desc: "Utility scripts for setup, benchmarking, data prep",
       children: [
-        { name: "download_weights.py", type: "file", desc: "Pull model weights from HuggingFace (GPT-2 or small Llama)" },
+        { name: "download_weights.py", type: "file", desc: "Pull model weights from HuggingFace (TinyLlama-1.1B-Chat)" },
         { name: "convert_weights.py", type: "file", desc: "Convert .safetensors → raw binary for C++ mmap loading" },
         { name: "validate.py", type: "file", desc: "Compare Atlas output vs HuggingFace for correctness verification" },
         { name: "benchmark.py", type: "file", desc: "Measure tokens/sec, latency, memory usage across all phases" },
