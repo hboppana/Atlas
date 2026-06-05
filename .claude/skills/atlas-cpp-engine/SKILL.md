@@ -62,19 +62,29 @@ From `docs/01-tensor-foundation.md` — match these:
 
 ## Build & test
 
-- **MSVC, C++17, CPU-only.** The CUDA path is guarded off in CMake for all of Phase 1.
+- **Toolchain: MinGW-w64 GCC (MSYS2 UCRT64, `C:\msys64\ucrt64\bin`), C++17, CPU-only.** No
+  MSVC on this machine; the CMake files are generator-agnostic so MSVC stays optional. The
+  CUDA path is guarded off (`ATLAS_USE_CUDA=OFF`) for all of Phase 1. Full build reference
+  and gotchas: `docs/build-setup.md`.
 - Top-level `CMakeLists.txt` adds `engine/`; `engine/CMakeLists.txt` builds the
-  `atlas_engine` static lib + test executables.
+  `atlas_engine` static lib + `test_tensor` (registered with CTest; `-static*` link flags
+  under `if (MINGW)` so the exe runs without UCRT64 on PATH at runtime).
 - **Zero-dependency test harness** — a tiny `CHECK(...)` assert macro, **no
-  GoogleTest/Catch2**. Less build friction on Windows, fits the from-scratch ethos.
-- Definition of done for a step = `cmake --build` succeeds on MSVC and the step's test exe
-  passes (checked against hand-computed values and/or the `reference/` oracles).
+  GoogleTest/Catch2**. Less build friction, fits the from-scratch ethos.
+- Definition of done for a step = `cmake --build` succeeds and the step's test passes via
+  `ctest` (checked against hand-computed values and/or the `reference/` oracles).
 
 ```powershell
-cmake -S . -B build
+# UCRT64 must be on PATH so g++ can load its runtime DLLs (else CMake says "compiler broken")
+$env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+cmake -S . -B build -G "MinGW Makefiles"   # single-config: no --config
 cmake --build build
-.\build\engine\tests\test_tensor.exe
+ctest --test-dir build --output-on-failure
 ```
+
+**conda boundary:** build the C++ engine with the **system MSYS2 GCC**, not conda — on
+Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda is for the
+**Python** layers (Step 0, and Phase 2+ incl. `pybind11`). See [[atlas-architecture]].
 
 ## Files (engine/)
 

@@ -1,6 +1,7 @@
 # Phase 1 · Step 1 — Tensor Foundation + C++ Build
 
-> Status: **planned** (not yet started)
+> Status: **done** — builds green on MinGW-w64 GCC; `ctest` shows `test_tensor` passing.
+> Build/toolchain details: [build-setup.md](build-setup.md).
 > Predecessor: Step 0 — ground truth (`scripts/download_weights.py`, golden oracles in `reference/`) — **done**
 > Successors: tokenizer → model + weight loading → forward-pass validation → quantize
 
@@ -10,13 +11,13 @@ Stand up the `engine/` C++ project with a `Tensor` class solid enough to build t
 entire TinyLlama forward pass on top of. Nothing model-specific in this step — just
 the data structure, memory model, and the handful of core ops everything else needs.
 
-Build everything CPU-only on Windows (MSVC), FP32, validated against the HuggingFace
-reference captured in Step 0.
+Build everything CPU-only on Windows (MinGW-w64 GCC; MSVC optional later), FP32, validated
+against the HuggingFace reference captured in Step 0.
 
 ## Definition of done
 
-- `cmake --build` succeeds on MSVC (C++17), CUDA path guarded off.
-- `test_tensor.exe` passes: shape/stride/indexing, reshape, and `matmul` checked
+- `cmake --build` succeeds (MinGW-w64 GCC, C++17), CUDA path guarded off.
+- `test_tensor` passes (via `ctest`): shape/stride/indexing, reshape, and `matmul` checked
   against hand-computed values.
 
 ## Files created in this step

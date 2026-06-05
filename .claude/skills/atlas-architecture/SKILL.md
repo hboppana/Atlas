@@ -6,7 +6,7 @@ description: Atlas project north star — the from-scratch ethos, the 5-phase bu
 # Atlas — Architecture & Conventions
 
 Atlas is a **full-stack AI research assistant for scholarly publications, built from the
-metal up**. Every layer is implemented from scratch — nothing is outsourced to a hosted
+ground up**. Every layer is implemented from scratch — nothing is outsourced to a hosted
 LLM API. It runs its own transformer inference engine (hand-written C++/CUDA), retrieves
 evidence from a vector store of ingested PDFs, orchestrates multi-step reasoning with
 LangGraph, and exposes the whole system through the Model Context Protocol (MCP).

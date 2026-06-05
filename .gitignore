@@ -6,6 +6,7 @@ build/
 *.o
 *.obj
 *.exe
+__cmake_systeminformation
 
 # Paper corpus and processed data
 data/papers/
