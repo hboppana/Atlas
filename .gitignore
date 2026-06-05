@@ -22,3 +22,6 @@ __pycache__/
 
 # Note: reference/ (golden test oracles) is intentionally NOT ignored -
 # token_ids.npy / logits.npy are small and serve as engine/tests/ fixtures.
+
+#gitignore the repo structure
+atlas-repo-structure.jsx
