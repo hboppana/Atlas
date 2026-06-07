@@ -57,10 +57,22 @@ small Python exporter (we already use Python for ground truth) reads `tokenizer.
 writes a trivial, line-oriented UTF-8 format the C++ reads directly:
 
 - `reference/tokenizer/vocab.txt` — 32000 lines, **one token per line, line index = id**
-  (Llama ids are contiguous 0…31999). Tokens are single-line safe: spaces are `▁`, newlines
-  are the `<0x0A>` byte token, never literal.
+  (Llama ids are contiguous 0…31999).
 - `reference/tokenizer/merges.txt` — 61249 lines, one `"a b"` pair per line, **line order =
-  rank**.
+  rank**. The single space is the delimiter; token halves never contain a literal space
+  (spaces are `▁`).
+
+**Escaping (discovered during implementation).** The original assumption that tokens are
+"single-line safe" is **false**: 24 vocab tokens contain a literal carriage return (e.g.
+`;\r`, `});\r` — learned from CRLF source), and many tokens (and merge halves) contain a
+backslash. A literal-token line format would let the embedded `\r` collide with the line
+separator, and `core.autocrlf=true` would rewrite separators to CRLF on checkout and
+corrupt the C++ read. The exporter therefore writes both files with **C-style escaping**
+(`\` → `\\`, CR → `\r`, LF → `\n`); ~167 of 32000 vocab lines and ~289 merge lines carry an
+escape, every other line is byte-identical to the raw token (still easy to diff). A
+committed `.gitattributes` pins `reference/tokenizer/*.txt` to `eol=lf` (safe now that no
+literal CR remains) and marks `*.npy binary`. The C++ loader reverses the escaping with a
+trivial unescape (`\\`→`\`, `\r`→CR, `\n`→LF).
 
 **Decision (confirmed): commit these to `reference/`** alongside the other oracles, so
 `test_tokenizer` is self-contained — it runs on a fresh clone and in CI **without** the 2 GB
@@ -77,7 +89,8 @@ rejected because it couples every test run to the full model download.)
 
 | File | Contents |
 |------|----------|
-| `scripts/export_tokenizer.py` | Read `weights/.../tokenizer.json`, write `reference/tokenizer/vocab.txt` + `merges.txt`. Asserts vocab=32000, BOS/EOS/UNK ids = 1/2/0. |
+| `scripts/export_tokenizer.py` | Read `weights/.../tokenizer.json`, write `reference/tokenizer/vocab.txt` + `merges.txt` (C-style escaped). Asserts vocab=32000, contiguous ids, BOS/EOS/UNK ids = 1/2/0. |
+| `.gitattributes` (new) | Pin `reference/tokenizer/*.txt` to `eol=lf`; mark `*.npy binary`. Protects oracle fixtures from `core.autocrlf` rewriting. |
 | `engine/include/tokenizer.h` | `Tokenizer` class — `load`, `encode`, `decode`, special-token ids |
 | `engine/src/tokenizer.cpp` | vocab/merges loading, normalization, BPE merge loop, byte fallback, BOS prepend, decode |
 | `engine/tests/test_tokenizer.cpp` | encode vs `reference/token_ids.npy`, decode round-trip, edge cases (zero-dep `CHECK` harness, as in Step 1) |

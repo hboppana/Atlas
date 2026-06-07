@@ -1,0 +1,10 @@
+# The repo has core.autocrlf=true on this machine. The C++ engine reads its golden
+# fixtures byte-for-byte, so pin line endings instead of letting git rewrite them.
+
+# Tokenizer exports: LF separators, always. Tokens with embedded CR are backslash-escaped
+# by scripts/export_tokenizer.py, so there is no literal CR in content to lose -- eol=lf
+# only normalizes the separators, keeping the files diffable and stable across platforms.
+reference/tokenizer/*.txt text eol=lf
+
+# Numpy oracle fixtures are binary; never touch their bytes.
+*.npy binary
