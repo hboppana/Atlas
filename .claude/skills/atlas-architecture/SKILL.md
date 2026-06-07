@@ -78,6 +78,7 @@ atlas/
   docs/           per-step design docs (e.g. 01-tensor-foundation.md)
 ```
 
-The authoritative, annotated layout is `atlas-repo-structure.jsx` at the repo root; the
-per-step design docs live in `docs/`. When in doubt about where something goes or what a
-file is responsible for, consult those before inventing new structure.
+The authoritative, annotated per-file layout lives in [`repo-structure.md`](repo-structure.md)
+next to this skill; the per-step design docs live in `docs/`. When in doubt about where
+something goes or what a file is responsible for, consult those before inventing new
+structure.

@@ -73,6 +73,6 @@ five-phase pipeline up front.
 ## Maintaining the skills (meta)
 
 This repo's `.claude/skills/` are living docs. On any **bug fix, major change, design
-change, or build that departs from `atlas-repo-structure.jsx`**, create or update the
+change, or build that departs from the repo layout in `atlas-architecture/repo-structure.md`**, create or update the
 relevant skill file as part of the same change (no approval needed). A code change and its
 skill update belong in the same commit.
