@@ -1,6 +1,6 @@
 # Phase 1 · Step 2 — BPE Tokenizer
 
-> Status: **planned** (not yet started)
+> Status: **done** — `test_tokenizer` green (exact-match oracle, round-trips, byte fallback).
 > Predecessor: Step 1 — tensor foundation + C++ build — **done** ([01-tensor-foundation.md](01-tensor-foundation.md))
 > Successors: model + weight loading → forward-pass validation → quantize
 

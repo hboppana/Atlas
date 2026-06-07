@@ -13,7 +13,7 @@ Read `atlas-architecture` first for the project-wide ethos.
 
 1. **Tensor foundation** + CMake build — the data structure and core ops. *(documented in
    `docs/01-tensor-foundation.md`)*
-2. **Tokenizer** — BPE/SentencePiece encode/decode, validated against `reference/token_ids.npy`.
+2. **Tokenizer** — BPE/SentencePiece encode/decode, validated against `reference/token_ids.npy`. *(done)*
 3. **Model + weight loading** — `convert_weights.py` (`.safetensors` → raw binary) plus
    mmap loading; the full forward pass.
 4. **Forward-pass validation** — a C++ `.npy` reader; compare logits to `reference/logits.npy`
@@ -91,7 +91,7 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 | File | Responsibility |
 |------|----------------|
 | `include/tensor.h` / `src/tensor.cpp` | Tensor class + core ops; memory mgmt, reshape, mmap weight loading |
-| `include/tokenizer.h` / `src/tokenizer.cpp` | BPE merge logic, special tokens, vocab from binary |
+| `include/tokenizer.h` / `src/tokenizer.cpp` | **done** — BPE merge logic, special tokens, byte fallback; loads the plain-text `reference/tokenizer/{vocab,merges}.txt` exported by `scripts/export_tokenizer.py` (not a binary blob — deliberate deviation, see `docs/02-tokenizer.md`) |
 | `include/model.h` / `src/model.cpp` | Model struct + CPU forward pass (embed, attention, FFN, norm) |
 | `include/quantize.h` / `src/quantize.cpp` | INT8 quant — scale/zero-point, FP32→INT8 |
 | `src/main.cpp` | CLI entry — load model, run inference, print tokens |
