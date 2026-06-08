@@ -15,7 +15,7 @@ Read `atlas-architecture` first for the project-wide ethos.
    `docs/01-tensor-foundation.md`)*
 2. **Tokenizer** — BPE/SentencePiece encode/decode, validated against `reference/token_ids.npy`. *(done)*
 3. **Model + weight loading** — `convert_weights.py` (`.safetensors` → raw binary) plus
-   mmap loading; the full forward pass.
+   mmap loading; the full forward pass. *(converter **done** — see Weight blob contract below)*
 4. **Forward-pass validation** — a C++ `.npy` reader; compare logits to `reference/logits.npy`
    within tolerance.
 5. **Quantize** — post-training FP32 → INT8, measure the accuracy delta.
@@ -96,6 +96,24 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 | `include/quantize.h` / `src/quantize.cpp` | INT8 quant — scale/zero-point, FP32→INT8 |
 | `src/main.cpp` | CLI entry — load model, run inference, print tokens |
 | `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |
+
+## Weight blob contract (`scripts/convert_weights.py`, Step 3.1 — done)
+
+`convert_weights.py` is **numpy-only** (no torch/safetensors dep): it parses the
+safetensors header by hand and upcasts BF16 → FP32 with `(u16 << 16).view(f32)` — exact
+for normals, subnormals, inf, nan (verified against an independent ldexp decode). It
+writes two gitignored files under `weights/tinyllama-1.1b-chat/`:
+
+- `model.f32.bin` — 201 tensors, FP32 little-endian, concatenated in a fixed order
+  (embed → layers 0..21 × 9 → `model.norm` → `lm_head`). 4.40 GB / 4400193536 bytes.
+- `model.manifest.txt` — 201 lines, `name byte_offset ndim d0 d1 ...`. Offsets are byte
+  offsets into the blob and are **contiguous** (manifest total == blob size). Weights keep
+  PyTorch `[out, in]` layout — the C++ `linear` helper computes `y = x @ Wᵀ`, no transpose
+  at convert time. The C++ `WeightStore` mmaps the blob and builds non-owning `Tensor::view`s
+  by name from the manifest (the `owns=false` payoff). On Windows use Win32
+  `CreateFileMappingA`/`MapViewOfFile`, isolated behind one `#ifdef _WIN32` so a POSIX `mmap`
+  path drops in for Phase 2. `test_forward` SKIPs green if the blob is absent (it's regenerated
+  locally, never committed).
 
 ## Reference oracles (the source of truth)
 
