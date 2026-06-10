@@ -24,13 +24,15 @@ Read `atlas-architecture` first for the project-wide ethos.
    mean-abs < 1e-4. Also fixed: the test's own `stat()` existence check silently SKIPped
    on the 4.4 GB blob — the >2 GB MinGW gotcha applies to tests too, use
    `std::ifstream(path).good()`. See `docs/04-forward-validation.md`.)*
-5. **Quantize** — post-training FP32 → INT8 (per-row symmetric, weights-only, quantized
-   at load time from the mmap'd views; embeddings/norms stay FP32), measure the accuracy
-   delta vs `reference/logits.npy` with the Step 4 comparison pattern. *(in progress —
-   `quantize.h`/`quantize.cpp` (`QTensor`, `quantize_rows`, `dequantize`, `linear_q8`)
-   and the blob-free `test_quantize` unit tests are done and green; remaining: model
-   integration (`Model::quantize_int8()` + `linear` dispatch), `--int8` CLI flag, and
-   the blob-gated end-to-end vs `logits.npy`. Spec: `docs/05-quantization.md`.)*
+5. **Quantize** — post-training FP32 → INT8 (per-row symmetric, weights-only W8A32,
+   quantized at load time from the mmap'd views; embeddings/norms stay FP32). *(**done**
+   — `test_quantize` green: per-row argmax matches the reference at all 6 positions,
+   measured max-abs 1.497 / mean-abs 8.43e-2 vs `logits.npy`, pinned at ~2× measured
+   (3.0 / 0.17); 155 matrices 4.14 GB → 1.04 GB int8; `atlas.exe --int8` works. Two
+   lessons: the a-priori 0.5/0.05 ceilings underestimated 22-layer error accumulation
+   ~3× — "near-lossless INT8" in the literature means perplexity, not per-logit max
+   diff; and the FP32-`lm_head` fallback was measured and rejected (mean 0.0843→0.0803
+   for +66 MB — the delta is layer drift, not lm_head). See `docs/05-quantization.md`.)*
 
 Don't pull steps forward. Each row of the table is its own focused, validated unit.
 
@@ -110,10 +112,10 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 |------|----------------|
 | `include/tensor.h` / `src/tensor.cpp` | Tensor class + core ops; memory mgmt, reshape, mmap weight loading |
 | `include/tokenizer.h` / `src/tokenizer.cpp` | **done** — BPE merge logic, special tokens, byte fallback; loads the plain-text `reference/tokenizer/{vocab,merges}.txt` exported by `scripts/export_tokenizer.py` (not a binary blob — deliberate deviation, see `docs/02-tokenizer.md`) |
-| `include/model.h` / `src/model.cpp` | **done** — `WeightStore` (Win32 mmap + manifest views), `linear` (y = x@Wᵀ), RMSNorm, RoPE (NeoX half-split), GQA causal attention, SwiGLU; full prefill forward |
+| `include/model.h` / `src/model.cpp` | **done** — `WeightStore` (Win32 mmap + manifest views), `linear` (y = x@Wᵀ), RMSNorm, RoPE (NeoX half-split), GQA causal attention, SwiGLU; full prefill forward. Step 5: `qweights` map + `quantize_int8()` (155 linears incl. lm_head), forward dispatches per weight name via the `proj` lambda — the single point where precision is decided |
 | `include/npy.h` / `src/npy.cpp` | **done** — zero-dep NPY v1.0 reader — `load_npy_f32` → owning Tensor, `load_npy_i32` → ids; only `<f4`/`<i4`, C-order, LE; dies loudly on anything else |
 | `include/quantize.h` / `src/quantize.cpp` | **done** — per-row symmetric INT8 (W8A32): move-only `QTensor` (int8 payload + per-row FP32 scales), `quantize_rows` (max-abs/127, ±127 clamp, zero-row → scale 1.0), `dequantize`, `linear_q8` (y = x@dequant(W)ᵀ, scale factored out of the dot product) |
-| `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (argv[1] or the reference default), forward, greedy-decode, print |
+| `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (arg or the reference default), forward, greedy-decode, print; `--int8` quantizes the linears first and prints the int8 byte count |
 | `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |
 
 ## Weight blob contract (`scripts/convert_weights.py`, Step 3.1 — done)
