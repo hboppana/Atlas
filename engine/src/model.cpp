@@ -36,6 +36,11 @@ namespace {
     std::exit(1);
 }
 
+}  // namespace
+
+// --- Model math building blocks (declared in model.h — exposed for the component
+// tests and Phase 2 CUDA kernel validation) ---
+
 // y = x @ Wᵀ. x is [m, in], w keeps the PyTorch nn.Linear [out, in] layout (no
 // transpose at convert time), out is [m, out]. Both w rows and x rows are contiguous,
 // so the inner dot product walks both buffers sequentially.
@@ -98,7 +103,64 @@ void rope(Tensor& x, const Tensor& cos, const Tensor& sin, int n_heads, int head
     }
 }
 
-}  // namespace
+// Causal scaled-dot-product attention, one query head at a time. GQA: query head hq
+// reads kv head hq / q_per_kv (HF repeat_kv expands kv heads in contiguous blocks).
+// Softmax in FP32 with max subtraction. q/ctx are [seq, n_heads*head_dim], k/v are
+// [seq, n_kv_heads*head_dim] — the 8:1 width asymmetry on TinyLlama.
+void attention(const Tensor& q, const Tensor& k, const Tensor& v,
+               int n_heads, int n_kv_heads, int head_dim, Tensor& ctx) {
+    const int64_t seq = q.shape[0];
+    const int64_t qd = static_cast<int64_t>(n_heads) * head_dim;
+    const int64_t kvd = static_cast<int64_t>(n_kv_heads) * head_dim;
+    assert(q.shape[1] == qd && ctx.shape[1] == qd && "attention: q/ctx width mismatch");
+    assert(k.shape[1] == kvd && v.shape[1] == kvd && "attention: k/v width mismatch");
+    assert(k.shape[0] == seq && v.shape[0] == seq && ctx.shape[0] == seq);
+    const int q_per_kv = n_heads / n_kv_heads;
+    const float inv_sqrt_hd = 1.0f / std::sqrt(static_cast<float>(head_dim));
+    std::vector<float> scores(static_cast<size_t>(seq));  // one query row's attention probs
+
+    for (int hq = 0; hq < n_heads; ++hq) {
+        const int hkv = hq / q_per_kv;
+        const int64_t q_off = static_cast<int64_t>(hq) * head_dim;
+        const int64_t kv_off = static_cast<int64_t>(hkv) * head_dim;
+        for (int64_t i = 0; i < seq; ++i) {
+            const float* qi = q.data + i * qd + q_off;
+            float max_score = -INFINITY;
+            for (int64_t j = 0; j <= i; ++j) {  // causal: keys j > i masked out
+                const float* kj = k.data + j * kvd + kv_off;
+                float dot = 0.0f;
+                for (int d = 0; d < head_dim; ++d) dot += qi[d] * kj[d];
+                const float sc = dot * inv_sqrt_hd;
+                scores[static_cast<size_t>(j)] = sc;
+                if (sc > max_score) max_score = sc;
+            }
+            float denom = 0.0f;
+            for (int64_t j = 0; j <= i; ++j) {
+                const float e = std::exp(scores[static_cast<size_t>(j)] - max_score);
+                scores[static_cast<size_t>(j)] = e;
+                denom += e;
+            }
+            float* out_row = ctx.data + i * qd + q_off;
+            for (int d = 0; d < head_dim; ++d) out_row[d] = 0.0f;
+            for (int64_t j = 0; j <= i; ++j) {
+                const float w = scores[static_cast<size_t>(j)] / denom;
+                const float* vj = v.data + j * kvd + kv_off;
+                for (int d = 0; d < head_dim; ++d) out_row[d] += w * vj[d];
+            }
+        }
+    }
+}
+
+// SwiGLU gating: gate = SiLU(gate) * up, in place in gate. SiLU(z) = z * sigmoid(z)
+// (a.k.a. swish).
+void swiglu(Tensor& gate, const Tensor& up) {
+    assert(gate.shape == up.shape && "swiglu: gate/up shape mismatch");
+    const int64_t total = gate.numel();
+    for (int64_t e = 0; e < total; ++e) {
+        const float z = gate.data[e];
+        gate.data[e] = z / (1.0f + std::exp(-z)) * up.data[e];
+    }
+}
 
 // --- WeightStore: mmap the FP32 blob, hand out non-owning views by manifest name ---
 
@@ -283,9 +345,6 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
     Tensor gate = Tensor::zeros({seq, I});
     Tensor up = Tensor::zeros({seq, I});
     Tensor mlp = Tensor::zeros({seq, H});
-    std::vector<float> scores(static_cast<size_t>(seq));  // one query row's attention probs
-
-    const float inv_sqrt_hd = 1.0f / std::sqrt(static_cast<float>(hd));
 
     // Linear dispatch — the single point where precision is decided: INT8 (linear_q8)
     // when quantize_int8() put the weight in qweights, FP32 otherwise. Everything else
@@ -312,39 +371,7 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
         rope(q, rope_cos, rope_sin, c.num_heads, hd);
         rope(k, rope_cos, rope_sin, c.num_kv_heads, hd);
 
-        // Causal scaled-dot-product attention, one query head at a time. GQA: query
-        // head hq reads kv head hq / q_per_kv (HF repeat_kv expands kv heads in
-        // contiguous blocks of 8). Softmax in FP32 with max subtraction.
-        for (int hq = 0; hq < c.num_heads; ++hq) {
-            const int hkv = hq / c.q_per_kv();
-            const int64_t q_off = static_cast<int64_t>(hq) * hd;
-            const int64_t kv_off = static_cast<int64_t>(hkv) * hd;
-            for (int64_t i = 0; i < seq; ++i) {
-                const float* qi = q.data + i * H + q_off;
-                float max_score = -INFINITY;
-                for (int64_t j = 0; j <= i; ++j) {  // causal: keys j > i masked out
-                    const float* kj = k.data + j * KV + kv_off;
-                    float dot = 0.0f;
-                    for (int d = 0; d < hd; ++d) dot += qi[d] * kj[d];
-                    const float sc = dot * inv_sqrt_hd;
-                    scores[static_cast<size_t>(j)] = sc;
-                    if (sc > max_score) max_score = sc;
-                }
-                float denom = 0.0f;
-                for (int64_t j = 0; j <= i; ++j) {
-                    const float e = std::exp(scores[static_cast<size_t>(j)] - max_score);
-                    scores[static_cast<size_t>(j)] = e;
-                    denom += e;
-                }
-                float* out_row = ctx.data + i * H + q_off;
-                for (int d = 0; d < hd; ++d) out_row[d] = 0.0f;
-                for (int64_t j = 0; j <= i; ++j) {
-                    const float w = scores[static_cast<size_t>(j)] / denom;
-                    const float* vj = v.data + j * KV + kv_off;
-                    for (int d = 0; d < hd; ++d) out_row[d] += w * vj[d];
-                }
-            }
-        }
+        attention(q, k, v, c.num_heads, c.num_kv_heads, hd, ctx);
         proj(ctx, p + "self_attn.o_proj.weight", attn);
         add(h, attn, h);  // residual
 
@@ -352,14 +379,7 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
         rmsnorm(h, weights.get(p + "post_attention_layernorm.weight"), c.rms_norm_eps, x);
         proj(x, p + "mlp.gate_proj.weight", gate);
         proj(x, p + "mlp.up_proj.weight", up);
-        // m = SiLU(gate) * up, in place in `gate`; SiLU(z) = z * sigmoid(z).
-        {
-            const int64_t total = gate.numel();
-            for (int64_t e = 0; e < total; ++e) {
-                const float z = gate.data[e];
-                gate.data[e] = z / (1.0f + std::exp(-z)) * up.data[e];
-            }
-        }
+        swiglu(gate, up);
         proj(gate, p + "mlp.down_proj.weight", mlp);
         add(h, mlp, h);  // residual
     }

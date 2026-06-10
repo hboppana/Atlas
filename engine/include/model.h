@@ -44,6 +44,32 @@ struct Config {
     int q_per_kv() const { return num_heads / num_kv_heads; }
 };
 
+// --- Model math building blocks -------------------------------------------------------
+// Exposed (rather than file-local in model.cpp) for two consumers beyond forward():
+// the component tests (test_model_math / test_rope / test_attention check each against
+// hand-computed oracles, blob-free) and Phase 2 CUDA validation, which compares each
+// kernel against these CPU references one component at a time. Free functions in the
+// tensor.h out-param style; semantics documented at the definitions in model.cpp.
+
+// y = x @ Wᵀ. x [m, in]; w in PyTorch nn.Linear [out, in] layout; out [m, out].
+void linear(const Tensor& x, const Tensor& w, Tensor& out);
+
+// RMSNorm per row (no mean subtraction): x_i / sqrt(mean(x²) + eps) * w_i.
+void rmsnorm(const Tensor& x, const Tensor& w, float eps, Tensor& out);
+
+// RoPE, HF Llama's half-split ("NeoX") rotation, in place. x [seq, n_heads*head_dim];
+// cos/sin [seq, head_dim] (the head_dim/2 angles concatenated with themselves).
+void rope(Tensor& x, const Tensor& cos, const Tensor& sin, int n_heads, int head_dim);
+
+// Causal scaled-dot-product GQA attention over RoPE'd projections. q and ctx are
+// [seq, n_heads*head_dim]; k and v are [seq, n_kv_heads*head_dim]; query head hq reads
+// kv head hq / (n_heads / n_kv_heads). Softmax in FP32 with max subtraction.
+void attention(const Tensor& q, const Tensor& k, const Tensor& v,
+               int n_heads, int n_kv_heads, int head_dim, Tensor& ctx);
+
+// SwiGLU gating, in place in gate: gate = SiLU(gate) * up, SiLU(z) = z * sigmoid(z).
+void swiglu(Tensor& gate, const Tensor& up);
+
 // Owns the mmap of model.f32.bin and hands out non-owning Tensor views into it, by name.
 // This is the first real use of tensor.h's owns=false path: the 4.4 GB blob is mapped
 // once and never copied — every weight is a Tensor::view window onto the mapping. The
