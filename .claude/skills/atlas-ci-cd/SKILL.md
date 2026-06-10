@@ -41,8 +41,10 @@ Atlas is built phase by phase, deeply — commits follow the same grain:
 
 ## Branching & PRs
 
-- `main` is the default/integration branch. **If asked to commit while on `main`, create a
-  branch first** rather than committing directly to `main`.
+- `main` is the default/integration branch. **Committing directly to `main` is fine and
+  is the norm** — the user explicitly prefers it (2026-06-09); don't create a step branch
+  unless they ask for one. Branches/PRs are for when the user requests review or the
+  change is experimental.
 - Suggested branch names track the phase/step: `phase1/tokenizer`, `phase2/matmul-kernel`,
   `fix/rope-sign`, `docs/forward-validation`.
 - Use the **`gh` CLI** for PRs and other GitHub operations.
