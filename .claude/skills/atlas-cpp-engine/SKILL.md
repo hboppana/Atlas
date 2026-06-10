@@ -24,7 +24,10 @@ Read `atlas-architecture` first for the project-wide ethos.
    mean-abs < 1e-4. Also fixed: the test's own `stat()` existence check silently SKIPped
    on the 4.4 GB blob — the >2 GB MinGW gotcha applies to tests too, use
    `std::ifstream(path).good()`. See `docs/04-forward-validation.md`.)*
-5. **Quantize** — post-training FP32 → INT8, measure the accuracy delta.
+5. **Quantize** — post-training FP32 → INT8 (per-row symmetric, weights-only, quantized
+   at load time from the mmap'd views; embeddings/norms stay FP32), measure the accuracy
+   delta vs `reference/logits.npy` with the Step 4 comparison pattern. *(planned — spec
+   in `docs/05-quantization.md`)*
 
 Don't pull steps forward. Each row of the table is its own focused, validated unit.
 
