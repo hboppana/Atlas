@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "quantize.h"
 #include "tensor.h"
 
 namespace atlas {
@@ -88,11 +89,23 @@ struct Model {
     Config config;
     WeightStore weights;
 
+    // INT8 path (Step 5): per-row symmetric quantized copies of the linear weights,
+    // keyed by manifest name, populated by quantize_int8(). Empty by default — pure
+    // FP32. When a name is present, forward's linear dispatch uses linear_q8 for it.
+    std::unordered_map<std::string, QTensor> qweights;
+
     // Load the converted weights (model.f32.bin + model.manifest.txt) and pair them with
     // the pinned config. The blob is mmap'd, not read into memory.
     static Model load(const std::string& bin_path,
                       const std::string& manifest_path,
                       const Config& cfg = Config{});
+
+    // Quantize the 155 linear matrices (q/k/v/o, gate/up/down x 22 layers + lm_head) to
+    // per-row symmetric INT8 — weights-only W8A32, docs/05-quantization.md. Embeddings
+    // and norms stay FP32 mmap views (a lookup and 368 KB of vectors — not worth error).
+    // Allocates ~1.03 GB of owned int8 buffers; the FP32 pages of the quantized matrices
+    // go cold afterwards and the OS evicts them.
+    void quantize_int8();
 
     // Full-sequence forward pass over the prompt token ids -> FP32 logits [seq, vocab].
     // Prefill only: no KV cache, no incremental decode (those arrive after the math is

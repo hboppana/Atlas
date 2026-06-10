@@ -217,6 +217,24 @@ Model Model::load(const std::string& bin_path, const std::string& manifest_path,
     return m;
 }
 
+void Model::quantize_int8() {
+    static const char* const kProjections[] = {
+        "self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight",
+        "self_attn.o_proj.weight", "mlp.gate_proj.weight",    "mlp.up_proj.weight",
+        "mlp.down_proj.weight"};
+    for (int layer = 0; layer < config.num_layers; ++layer) {
+        const std::string p = "model.layers." + std::to_string(layer) + ".";
+        for (const char* name : kProjections) {
+            qweights.emplace(p + name, quantize_rows(weights.get(p + name)));
+        }
+    }
+    // lm_head is quantized too: the docs/05 FP32-lm_head fallback was measured
+    // (2026-06-10) and rejected — it improves mean abs diff only 0.0843 -> 0.0803
+    // (the delta is accumulated hidden-state drift across the 22 layers, not lm_head's
+    // direct logit error) while giving up 66 MB of the memory win.
+    qweights.emplace("lm_head.weight", quantize_rows(weights.get("lm_head.weight")));
+}
+
 Tensor Model::forward(const std::vector<int>& token_ids) const {
     const Config& c = config;
     const int64_t seq = static_cast<int64_t>(token_ids.size());
@@ -269,15 +287,28 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
 
     const float inv_sqrt_hd = 1.0f / std::sqrt(static_cast<float>(hd));
 
+    // Linear dispatch — the single point where precision is decided: INT8 (linear_q8)
+    // when quantize_int8() put the weight in qweights, FP32 otherwise. Everything else
+    // in the forward pass is precision-agnostic, which is what keeps the Step 5
+    // measured delta attributable to quantization alone.
+    const auto proj = [&](const Tensor& input, const std::string& name, Tensor& result) {
+        const auto it = qweights.find(name);
+        if (it != qweights.end()) {
+            linear_q8(input, it->second, result);
+        } else {
+            linear(input, weights.get(name), result);
+        }
+    };
+
     // 2. The 22 pre-norm residual blocks.
     for (int layer = 0; layer < c.num_layers; ++layer) {
         const std::string p = "model.layers." + std::to_string(layer) + ".";
 
         // -- attention sublayer --
         rmsnorm(h, weights.get(p + "input_layernorm.weight"), c.rms_norm_eps, x);
-        linear(x, weights.get(p + "self_attn.q_proj.weight"), q);
-        linear(x, weights.get(p + "self_attn.k_proj.weight"), k);
-        linear(x, weights.get(p + "self_attn.v_proj.weight"), v);
+        proj(x, p + "self_attn.q_proj.weight", q);
+        proj(x, p + "self_attn.k_proj.weight", k);
+        proj(x, p + "self_attn.v_proj.weight", v);
         rope(q, rope_cos, rope_sin, c.num_heads, hd);
         rope(k, rope_cos, rope_sin, c.num_kv_heads, hd);
 
@@ -314,13 +345,13 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
                 }
             }
         }
-        linear(ctx, weights.get(p + "self_attn.o_proj.weight"), attn);
+        proj(ctx, p + "self_attn.o_proj.weight", attn);
         add(h, attn, h);  // residual
 
         // -- SwiGLU MLP sublayer --
         rmsnorm(h, weights.get(p + "post_attention_layernorm.weight"), c.rms_norm_eps, x);
-        linear(x, weights.get(p + "mlp.gate_proj.weight"), gate);
-        linear(x, weights.get(p + "mlp.up_proj.weight"), up);
+        proj(x, p + "mlp.gate_proj.weight", gate);
+        proj(x, p + "mlp.up_proj.weight", up);
         // m = SiLU(gate) * up, in place in `gate`; SiLU(z) = z * sigmoid(z).
         {
             const int64_t total = gate.numel();
@@ -329,14 +360,14 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
                 gate.data[e] = z / (1.0f + std::exp(-z)) * up.data[e];
             }
         }
-        linear(gate, weights.get(p + "mlp.down_proj.weight"), mlp);
+        proj(gate, p + "mlp.down_proj.weight", mlp);
         add(h, mlp, h);  // residual
     }
 
     // 3. Final RMSNorm, 4. LM head -> [seq, vocab] logits.
     rmsnorm(h, weights.get("model.norm.weight"), c.rms_norm_eps, x);
     Tensor logits = Tensor::zeros({seq, c.vocab_size});
-    linear(x, weights.get("lm_head.weight"), logits);
+    proj(x, "lm_head.weight", logits);
     return logits;
 }
 

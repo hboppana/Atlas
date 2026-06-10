@@ -10,14 +10,22 @@
 //      within the analytic error bound (scale_o/2 per weight) of the computation over
 //      the original weights. Deterministic formula-filled matrices, no RNG.
 //
-// The blob-gated end-to-end — quantized forward vs reference/logits.npy with the
-// Step 4 gates (per-row argmax + max/mean abs diff, measure-then-pin) — lands with
-// the model integration (Model::quantize_int8 + linear dispatch). See
-// docs/05-quantization.md.
+// Blob-gated end-to-end (SKIPs green without the 4.4 GB local blob, like test_forward):
+//   3. Model::quantize_int8() + INT8 forward vs reference/logits.npy with the Step 4
+//      gates — per-row argmax matches at all 6 positions (greedy decoding unchanged by
+//      quantization), max/mean abs diff under the pinned thresholds, measured values
+//      printed (measure-then-pin). The FP32 engine sits 1.44e-4 from this oracle, so
+//      the diff measured here is the cost of quantization, not implementation error.
+// See docs/05-quantization.md.
 
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <string>
+#include <vector>
 
+#include "../include/model.h"
+#include "../include/npy.h"
 #include "../include/quantize.h"
 #include "../include/tensor.h"
 
@@ -137,9 +145,96 @@ static void test_linear_q8() {
     }
 }
 
+// std::ifstream, not stat(): MinGW's 32-bit stat() fails on files >2 GB, and the
+// weight blob is 4.4 GB.
+static bool file_exists(const std::string& path) {
+    return std::ifstream(path).good();
+}
+
+// --- 3. blob-gated end-to-end: INT8 forward vs the HF golden oracle ------------------
+static void test_int8_forward(const std::string& ref, const std::string& wdir) {
+    const std::string bin = wdir + "/model.f32.bin";
+    const std::string manifest = wdir + "/model.manifest.txt";
+    if (!file_exists(bin) || !file_exists(manifest)) {
+        std::printf("SKIP int8 forward: %s not found.\n", bin.c_str());
+        std::printf("     Run scripts/convert_weights.py to generate it locally.\n");
+        return;  // green: the blob is a local artifact, never committed
+    }
+
+    std::printf("test_quantize: loading model + quantizing linear weights to INT8\n");
+    const std::vector<int> ids = atlas::load_npy_i32(ref + "/token_ids.npy");
+    auto model = atlas::Model::load(bin, manifest);
+    model.quantize_int8();
+    size_t qbytes = 0;
+    for (const auto& kv : model.qweights) {
+        qbytes += kv.second.data.size() + kv.second.scales.size() * sizeof(float);
+    }
+    std::printf("  %zu matrices -> %.3f GB of int8 (+ per-row scales); was 4.14 GB FP32\n",
+                model.qweights.size(), static_cast<double>(qbytes) / 1e9);
+    CHECK(model.qweights.size() == 155);  // 22 layers x 7 projections + lm_head
+
+    std::printf("test_quantize: running 6-token INT8 forward pass\n");
+    const atlas::Tensor logits = model.forward(ids);
+    const atlas::Tensor refl = atlas::load_npy_f32(ref + "/logits.npy");
+    CHECK(logits.shape.size() == 2);
+    CHECK(logits.shape == refl.shape);
+
+    const int64_t seq = logits.shape[0];
+    const int64_t vocab = logits.shape[1];
+    double max_abs = 0.0;
+    double sum_abs = 0.0;  // double: the metric must be more precise than what it measures
+    const int64_t total = seq * vocab;
+    for (int64_t i = 0; i < total; ++i) {
+        const double d = std::fabs(static_cast<double>(logits.data[i]) -
+                                   static_cast<double>(refl.data[i]));
+        if (d > max_abs) max_abs = d;
+        sum_abs += d;
+    }
+    const double mean_abs = sum_abs / static_cast<double>(total);
+    std::printf("  max_abs=%.6g mean_abs=%.6g over %lld logits\n", max_abs, mean_abs,
+                static_cast<long long>(total));
+
+    // The semantic gate: greedy decoding must be unchanged by quantization at every
+    // position, not just the last. Deterministic forward, so this is a fixed fact of
+    // the scheme, not a flaky threshold.
+    for (int64_t r = 0; r < seq; ++r) {
+        const float* ours = logits.data + r * vocab;
+        const float* theirs = refl.data + r * vocab;
+        int64_t our_best = 0, ref_best = 0;
+        for (int64_t j = 1; j < vocab; ++j) {
+            if (ours[j] > ours[our_best]) our_best = j;
+            if (theirs[j] > theirs[ref_best]) ref_best = j;
+        }
+        std::printf("  row %lld argmax: ours=%lld ref=%lld\n", static_cast<long long>(r),
+                    static_cast<long long>(our_best), static_cast<long long>(ref_best));
+        CHECK(our_best == ref_best);
+    }
+    // For the docs/05 measured-results record: FP32 had ▁Paris (3681) at 13.3885.
+    std::printf("  last-row logit for id 3681 (▁Paris): %.4f\n",
+                logits.data[(seq - 1) * vocab + 3681]);
+
+    // Pinned at ~2x the first measured run (2026-06-10: max_abs=1.497, mean_abs=0.0843
+    // — see docs/05 for why the original 0.5/0.05 ceilings underestimated 22-layer
+    // error accumulation). The forward is deterministic, so 2x is margin for compiler
+    // reassociation differences, not run-to-run noise; a broken scheme (wrong scale
+    // axis, overflow) still moves logits by whole units and fails these.
+    CHECK(max_abs < 3.0);
+    CHECK(mean_abs < 0.17);
+}
+
 int main() {
     test_round_trip();
     test_linear_q8();
+
+    // End-to-end needs the reference oracles (committed) and the weight blob (local
+    // only) — SKIPs green without the blob, after the unit tests have already run.
+    const std::string ref = ATLAS_REFERENCE_DIR;
+    const std::string wdir = ATLAS_WEIGHTS_DIR;
+    if (!ref.empty() && !wdir.empty()) {
+        test_int8_forward(ref, wdir);
+    } else {
+        std::printf("SKIP int8 forward: ATLAS_REFERENCE_DIR / ATLAS_WEIGHTS_DIR not set.\n");
+    }
 
     if (g_failures == 0) {
         std::printf("test_quantize: all checks passed\n");

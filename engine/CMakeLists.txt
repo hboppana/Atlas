@@ -34,8 +34,8 @@ target_compile_definitions(test_forward PRIVATE
 add_test(NAME test_forward COMMAND test_forward)
 
 # INT8 quantization. The unit tests (round-trip, linear_q8 bounds) are blob-free and
-# run anywhere; the end-to-end INT8-forward comparison (added with the model
-# integration) needs the blob and SKIPs green without it, like test_forward.
+# run anywhere; the end-to-end INT8-forward comparison vs reference/logits.npy needs
+# the blob and SKIPs green without it, like test_forward.
 add_executable(test_quantize tests/test_quantize.cpp)
 target_link_libraries(test_quantize PRIVATE atlas_engine)
 target_compile_definitions(test_quantize PRIVATE
