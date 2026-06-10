@@ -1,6 +1,7 @@
 # Phase 1 · Step 3 — Model + Weight Loading + Forward Pass
 
-> Status: **planned** (not yet started)
+> Status: **done** — forward pass runs end-to-end; `test_forward` green
+> (top-1 of the last position: id 3681 `▁Paris`, logit 13.3885; ~11 s single-threaded -O3)
 > Predecessor: Step 2 — BPE tokenizer — **done** ([02-tokenizer.md](02-tokenizer.md))
 > Successor: Step 4 — forward-pass validation (C++ `.npy` reader, compare to `reference/logits.npy`)
 
@@ -172,3 +173,16 @@ model=network split from Step 1.
 - `reference/logits.npy` — `[6, 32000]` FP32, prompt "The capital of France is". The Step 0
   run reported a `▁Paris`-topped top-5; reproducing that top-1 is this step's bar, and the
   full per-logit match is Step 4's.
+
+## Implementation notes (what the build actually hit)
+
+- **MinGW's 32-bit `stat()` overflows on the 4.4 GB blob** and reports it missing —
+  `test_forward`'s skip-check uses `std::ifstream(path).good()` instead. (The mmap path
+  itself uses `GetFileSizeEx`, which is 64-bit.)
+- **`CMAKE_BUILD_TYPE` now defaults to Release** in the top-level CMakeLists: the naive
+  single-threaded forward is ~6.6 GMAC and needs `-O3` to finish in seconds (an
+  unoptimized Debug build takes minutes). Pass `-DCMAKE_BUILD_TYPE=Debug` explicitly when
+  the Tensor asserts (compiled out under `NDEBUG`) are wanted.
+- The result on the reference prompt: top-1 id **3681** (`▁Paris`), logit **13.3885**.
+  `atlas.exe` (the new CLI) prints the full pipeline and the completion
+  `"The capital of France is Paris"`.

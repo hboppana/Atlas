@@ -4,6 +4,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(atlas LANGUAGES CXX)
 
+# Default to Release: the naive FP32 forward pass is ~6.6 GMAC over the reference
+# prompt and needs -O3 to run in seconds rather than minutes. Use -DCMAKE_BUILD_TYPE=Debug
+# explicitly when the Tensor asserts (compiled out under NDEBUG) are wanted.
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -15,7 +15,8 @@ Read `atlas-architecture` first for the project-wide ethos.
    `docs/01-tensor-foundation.md`)*
 2. **Tokenizer** — BPE/SentencePiece encode/decode, validated against `reference/token_ids.npy`. *(done)*
 3. **Model + weight loading** — `convert_weights.py` (`.safetensors` → raw binary) plus
-   mmap loading; the full forward pass. *(converter **done** — see Weight blob contract below)*
+   mmap loading; the full forward pass. *(**done** — `test_forward` green: top-1 id 3681
+   `▁Paris`, logit 13.3885; see Weight blob contract below and `docs/03-model-weights.md`)*
 4. **Forward-pass validation** — a C++ `.npy` reader; compare logits to `reference/logits.npy`
    within tolerance.
 5. **Quantize** — post-training FP32 → INT8, measure the accuracy delta.
@@ -82,6 +83,12 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+- **`CMAKE_BUILD_TYPE` defaults to Release** (set in the top-level CMakeLists): the naive
+  FP32 forward needs `-O3` to run in ~11 s instead of minutes. Debug (asserts on) must be
+  requested explicitly.
+- **MinGW gotcha: 32-bit `stat()` fails on files >2 GB** (the 4.4 GB weight blob) —
+  check existence with `std::ifstream(path).good()`, size with `GetFileSizeEx`.
+
 **conda boundary:** build the C++ engine with the **system MSYS2 GCC**, not conda — on
 Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda is for the
 **Python** layers (Step 0, and Phase 2+ incl. `pybind11`). See [[atlas-architecture]].
@@ -92,9 +99,9 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 |------|----------------|
 | `include/tensor.h` / `src/tensor.cpp` | Tensor class + core ops; memory mgmt, reshape, mmap weight loading |
 | `include/tokenizer.h` / `src/tokenizer.cpp` | **done** — BPE merge logic, special tokens, byte fallback; loads the plain-text `reference/tokenizer/{vocab,merges}.txt` exported by `scripts/export_tokenizer.py` (not a binary blob — deliberate deviation, see `docs/02-tokenizer.md`) |
-| `include/model.h` / `src/model.cpp` | Model struct + CPU forward pass (embed, attention, FFN, norm) |
+| `include/model.h` / `src/model.cpp` | **done** — `WeightStore` (Win32 mmap + manifest views), `linear` (y = x@Wᵀ), RMSNorm, RoPE (NeoX half-split), GQA causal attention, SwiGLU; full prefill forward |
 | `include/quantize.h` / `src/quantize.cpp` | INT8 quant — scale/zero-point, FP32→INT8 |
-| `src/main.cpp` | CLI entry — load model, run inference, print tokens |
+| `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (argv[1] or the reference default), forward, greedy-decode, print |
 | `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |
 
 ## Weight blob contract (`scripts/convert_weights.py`, Step 3.1 — done)
