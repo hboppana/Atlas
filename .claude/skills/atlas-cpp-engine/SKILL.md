@@ -26,8 +26,11 @@ Read `atlas-architecture` first for the project-wide ethos.
    `std::ifstream(path).good()`. See `docs/04-forward-validation.md`.)*
 5. **Quantize** — post-training FP32 → INT8 (per-row symmetric, weights-only, quantized
    at load time from the mmap'd views; embeddings/norms stay FP32), measure the accuracy
-   delta vs `reference/logits.npy` with the Step 4 comparison pattern. *(planned — spec
-   in `docs/05-quantization.md`)*
+   delta vs `reference/logits.npy` with the Step 4 comparison pattern. *(in progress —
+   `quantize.h`/`quantize.cpp` (`QTensor`, `quantize_rows`, `dequantize`, `linear_q8`)
+   and the blob-free `test_quantize` unit tests are done and green; remaining: model
+   integration (`Model::quantize_int8()` + `linear` dispatch), `--int8` CLI flag, and
+   the blob-gated end-to-end vs `logits.npy`. Spec: `docs/05-quantization.md`.)*
 
 Don't pull steps forward. Each row of the table is its own focused, validated unit.
 
@@ -109,7 +112,7 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 | `include/tokenizer.h` / `src/tokenizer.cpp` | **done** — BPE merge logic, special tokens, byte fallback; loads the plain-text `reference/tokenizer/{vocab,merges}.txt` exported by `scripts/export_tokenizer.py` (not a binary blob — deliberate deviation, see `docs/02-tokenizer.md`) |
 | `include/model.h` / `src/model.cpp` | **done** — `WeightStore` (Win32 mmap + manifest views), `linear` (y = x@Wᵀ), RMSNorm, RoPE (NeoX half-split), GQA causal attention, SwiGLU; full prefill forward |
 | `include/npy.h` / `src/npy.cpp` | **done** — zero-dep NPY v1.0 reader — `load_npy_f32` → owning Tensor, `load_npy_i32` → ids; only `<f4`/`<i4`, C-order, LE; dies loudly on anything else |
-| `include/quantize.h` / `src/quantize.cpp` | INT8 quant — scale/zero-point, FP32→INT8 |
+| `include/quantize.h` / `src/quantize.cpp` | **done** — per-row symmetric INT8 (W8A32): move-only `QTensor` (int8 payload + per-row FP32 scales), `quantize_rows` (max-abs/127, ±127 clamp, zero-row → scale 1.0), `dequantize`, `linear_q8` (y = x@dequant(W)ᵀ, scale factored out of the dot product) |
 | `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (argv[1] or the reference default), forward, greedy-decode, print |
 | `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |
 
