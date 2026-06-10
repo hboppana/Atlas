@@ -18,9 +18,12 @@ Read `atlas-architecture` first for the project-wide ethos.
    mmap loading; the full forward pass. *(**done** — `test_forward` green: top-1 id 3681
    `▁Paris`, logit 13.3885; see Weight blob contract below and `docs/03-model-weights.md`)*
 4. **Forward-pass validation** — a C++ `.npy` reader (`npy.h`/`npy.cpp`, in the lib —
-   reused by Step 5 and Phase 2); extend `test_forward` with a tolerance check vs
-   `reference/logits.npy` (max-abs < 1e-2, mean-abs < 1e-3, per-row argmax — measure,
-   then tighten the pins). *(planned in `docs/04-forward-validation.md`)*
+   reused by Step 5 and Phase 2); `test_forward` tolerance check vs `reference/logits.npy`.
+   *(**done** — measured max-abs 1.44e-4 / mean-abs 8.27e-6 over all 6×32000 logits,
+   per-row argmax matches all 6 rows; pins tightened to ~10× measured: max-abs < 1.5e-3,
+   mean-abs < 1e-4. Also fixed: the test's own `stat()` existence check silently SKIPped
+   on the 4.4 GB blob — the >2 GB MinGW gotcha applies to tests too, use
+   `std::ifstream(path).good()`. See `docs/04-forward-validation.md`.)*
 5. **Quantize** — post-training FP32 → INT8, measure the accuracy delta.
 
 Don't pull steps forward. Each row of the table is its own focused, validated unit.
@@ -102,7 +105,7 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 | `include/tensor.h` / `src/tensor.cpp` | Tensor class + core ops; memory mgmt, reshape, mmap weight loading |
 | `include/tokenizer.h` / `src/tokenizer.cpp` | **done** — BPE merge logic, special tokens, byte fallback; loads the plain-text `reference/tokenizer/{vocab,merges}.txt` exported by `scripts/export_tokenizer.py` (not a binary blob — deliberate deviation, see `docs/02-tokenizer.md`) |
 | `include/model.h` / `src/model.cpp` | **done** — `WeightStore` (Win32 mmap + manifest views), `linear` (y = x@Wᵀ), RMSNorm, RoPE (NeoX half-split), GQA causal attention, SwiGLU; full prefill forward |
-| `include/npy.h` / `src/npy.cpp` | *(Step 4, planned)* zero-dep NPY v1.0 reader — `load_npy_f32` → owning Tensor, `load_npy_i32` → ids; only `<f4`/`<i4`, C-order, LE; asserts on anything else |
+| `include/npy.h` / `src/npy.cpp` | **done** — zero-dep NPY v1.0 reader — `load_npy_f32` → owning Tensor, `load_npy_i32` → ids; only `<f4`/`<i4`, C-order, LE; dies loudly on anything else |
 | `include/quantize.h` / `src/quantize.cpp` | INT8 quant — scale/zero-point, FP32→INT8 |
 | `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (argv[1] or the reference default), forward, greedy-decode, print |
 | `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |

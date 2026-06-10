@@ -1,6 +1,6 @@
 # Phase 1 · Step 4 — Forward-Pass Validation
 
-> Status: **next up** — not started
+> Status: **done** — `test_forward` green with the tightened pins (see Measured results)
 > Predecessor: Step 3 — model + weight loading + forward pass — **done** ([03-model-weights.md](03-model-weights.md))
 > Successor: Step 5 — INT8 quantization (FP32 → INT8, measure the accuracy delta)
 
@@ -42,6 +42,23 @@ bit-identical to torch's. Bitwise equality is unachievable and not the goal; agr
   header parsing on a file the test already knows the contents of.
 - SKIP behavior unchanged: no weight blob → `test_forward` SKIPs green
   (`logits.npy` itself is committed, so it is never the missing piece).
+
+## Measured results (first green run, 2026-06-09)
+
+Over all 6 × 32000 logits:
+
+| Metric | Measured | Pinned (≈10× measured) | Original ceiling |
+|--------|----------|------------------------|------------------|
+| max abs diff | 1.44e-4 | **< 1.5e-3** | 1e-2 |
+| mean abs diff | 8.27e-6 | **< 1e-4** | 1e-3 |
+
+Per-row argmax matched the reference at all 6 positions
+(`529, 29871, 310, 278, 29892, 3681` — row 5 is `▁Paris`, logit 13.3885).
+
+**Found along the way:** Step 3's `test_forward` checked the blob's existence with
+`stat()`, which on MinGW is 32-bit and fails on the 4.4 GB blob — the test had been
+silently SKIPping. Replaced with the `std::ifstream(path).good()` idiom (the same
+gotcha Step 3 already fixed inside `model.cpp`).
 
 ## The `.npy` files on disk (what the reader must parse)
 

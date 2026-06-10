@@ -4,6 +4,7 @@ add_library(atlas_engine STATIC
     src/tensor.cpp
     src/tokenizer.cpp
     src/model.cpp
+    src/npy.cpp
 )
 target_include_directories(atlas_engine PUBLIC include)
 target_compile_features(atlas_engine PUBLIC cxx_std_17)
