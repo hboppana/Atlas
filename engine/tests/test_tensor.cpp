@@ -110,12 +110,57 @@ static void test_move_semantics() {
     CHECK(b.owns);
 }
 
+static void test_view_aliasing() {
+    // Tensor::view is the owns=false path weight loading is built on: a window over a
+    // caller-owned buffer, writes visible in both directions, nothing freed on destroy.
+    float buf[6] = {0, 1, 2, 3, 4, 5};
+    {
+        Tensor v = Tensor::view(buf, {2, 3});
+        CHECK(!v.owns);
+        CHECK(v.data == buf);
+        CHECK(v.at({1, 2}) == 5.0f);
+        v.at({0, 1}) = 9.0f;   // write through the view...
+        buf[5] = -4.0f;        // ...and through the buffer
+        CHECK(buf[1] == 9.0f);
+        CHECK(v.at({1, 2}) == -4.0f);
+    }
+    CHECK(buf[1] == 9.0f);  // view destruction must not touch the buffer
+}
+
+static void test_move_assign() {
+    Tensor a = Tensor::zeros({2, 2});
+    a.at({0, 0}) = 7.0f;
+    float* p = a.data;
+    Tensor b = Tensor::zeros({3, 3});  // existing owned buffer must be freed, not leaked
+    b = std::move(a);
+    CHECK(b.data == p);
+    CHECK(b.owns);
+    CHECK(b.shape == std::vector<int64_t>({2, 2}));
+    CHECK(b.at({0, 0}) == 7.0f);
+    CHECK(a.data == nullptr);
+    CHECK(!a.owns);
+}
+
+static void test_3d_strides() {
+    Tensor t = Tensor::zeros({2, 3, 4});
+    CHECK(t.numel() == 24);
+    CHECK(t.strides == std::vector<int64_t>({12, 4, 1}));  // row-major contiguous
+    t.at({1, 2, 3}) = 5.0f;
+    CHECK(t.data[1 * 12 + 2 * 4 + 3] == 5.0f);
+    Tensor r = t.reshape({6, 4});  // rank change keeps the buffer, recomputes strides
+    CHECK(r.strides == std::vector<int64_t>({4, 1}));
+    CHECK(r.at({5, 3}) == 5.0f);
+}
+
 int main() {
     test_shape_stride_index();
     test_reshape();
     test_matmul();
     test_add_mul();
     test_move_semantics();
+    test_view_aliasing();
+    test_move_assign();
+    test_3d_strides();
 
     if (g_failures == 0) {
         std::printf("All tensor tests passed.\n");
