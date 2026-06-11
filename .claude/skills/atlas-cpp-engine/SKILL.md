@@ -116,7 +116,7 @@ Windows conda only offers an MSVC wrapper (needs VS) or a stale GCC 8.x. conda i
 | `include/npy.h` / `src/npy.cpp` | **done** — zero-dep NPY v1.0 reader — `load_npy_f32` → owning Tensor, `load_npy_i32` → ids; only `<f4`/`<i4`, C-order, LE; dies loudly on anything else |
 | `include/quantize.h` / `src/quantize.cpp` | **done** — per-row symmetric INT8 (W8A32): move-only `QTensor` (int8 payload + per-row FP32 scales), `quantize_rows` (max-abs/127, ±127 clamp, zero-row → scale 1.0), `dequantize`, `linear_q8` (y = x@dequant(W)ᵀ, scale factored out of the dot product) |
 | `src/main.cpp` | **done** — CLI (`atlas.exe`): load tokenizer + model, encode prompt (arg or the reference default), forward, greedy-decode, print; `--int8` quantizes the linears first and prints the int8 byte count |
-| `tests/test_tensor.cpp` `test_tokenizer.cpp` `test_forward.cpp` `test_quantize.cpp` | Correctness vs `reference/` |
+| `tests/` (10 CTest targets — see `docs/06-phase1-test-hardening.md`) | 8 blob-free (< 2 s total): `test_tensor`, `test_tokenizer`, `test_tokenizer_edges` (decode∘encode properties + full-vocab sweep), `test_model_math`, `test_rope` (half-split vs closed form), `test_attention` (causal/GQA-mapping/softmax), `test_npy` + `test_weightstore` (synthetic fixtures + self-subprocess death tests). 2 blob-gated e2e vs `reference/logits.npy`: `test_forward`, `test_quantize`. CMake: one `atlas_add_test(<name>)` per target |
 
 ## Weight blob contract (`scripts/convert_weights.py`, Step 3.1 — done)
 
