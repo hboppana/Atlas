@@ -1,6 +1,6 @@
 # Phase 2 · Step 1 — CUDA bring-up (build path, SLURM loop, `DeviceTensor`, validation harness)
 
-> Status: **planned** — not started
+> Status: **in progress** — infra code landed (`engine/cuda/`, `slurm/`); SLURM scripts carry placeholder cluster values (account/partition/CUDA module) pending the first HiPerGator run, where the on-device validation happens. CPU build stays green with `ATLAS_USE_CUDA=OFF`.
 > Predecessor: Phase 1 Addendum — test-suite hardening — **done** ([06-phase1-test-hardening.md](06-phase1-test-hardening.md))
 > Successor: Step 2 — the tiled **matmul** kernel, validated against the CPU `linear` oracle (first kernel to ride this infra)
 

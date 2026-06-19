@@ -1,0 +1,22 @@
+# Phase 2 CUDA target — built only when ATLAS_USE_CUDA=ON (HiPerGator A6000, sm_86; never
+# the Windows dev box). Step 1 is infra-only: the DeviceTensor primitive + copy helpers +
+# a no-math payload kernel. Real kernels (matmul, ...) join atlas_cuda from Step 2 on.
+# See docs/07-cuda-build-matmul.md.
+
+add_library(atlas_cuda STATIC
+    device_tensor.cu
+)
+# Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
+# the validation oracle). Headers are reached via relative include paths from the .cu files.
+target_link_libraries(atlas_cuda PUBLIC atlas_engine)
+set_target_properties(atlas_cuda PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    POSITION_INDEPENDENT_CODE ON)
+
+# --- test (blob-free; round-trip + diff harness + CUDA_CHECK death case) ---
+# Registered with CTest like the Phase 1 targets, but run on a GPU node via slurm/test_cuda.sh
+# (`ctest -R test_device`). No MinGW static-link options — that is a Windows/GCC concern; the
+# CUDA build is Linux/nvcc.
+add_executable(test_device tests/test_device.cu)
+target_link_libraries(test_device PRIVATE atlas_cuda)
+add_test(NAME test_device COMMAND test_device)

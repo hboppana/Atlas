@@ -10,7 +10,31 @@ is complete and the CPU forward pass matches `reference/logits.npy`. Read
 `atlas-architecture` first. CUDA kernels replace CPU ops *without changing results* — every
 kernel is validated against the same `reference/` oracles within tolerance.
 
+## Step 1 — bring-up infra (LANDED, docs/07) — before any kernel
+
+Phase 2 splits infra from the first kernel so failure domains stay apart. Step 1 writes
+**no compute kernel** — it stands up the scaffolding every kernel rides on, proven with a
+no-math round-trip. What exists in `engine/cuda/`:
+
+- `device_tensor.h` / `.cu` — `DeviceTensor`: the device mirror of `Tensor` (owns-or-view,
+  **move-only**, row-major strides). `alloc`/`view`/`numel`; `to_device`/`to_host` copy
+  helpers (out-param style; host `Tensor` is the source of truth for shape/stride). Header
+  stays host-includable. Also holds the Step-1-only `launch_scale` payload kernel.
+- `cuda_check.h` — `CUDA_CHECK(expr)` (assert-don't-handle: report + `std::abort`) and
+  `CUDA_CHECK_KERNEL()` (poll `cudaGetLastError` + sync after a launch). CUDA-only, so it
+  lives apart from `device_tensor.h`. **Wrap every CUDA runtime call.**
+- `tests/test_device.cu` — round-trip/identity (bit-exact), the **reusable diff harness**
+  (`compare()` → max-abs/mean-abs; *measure on first green run, then pin* — Step 2 drops in
+  `linear()` as oracle unchanged), and a CUDA_CHECK-fires death case (self-subprocess).
+- Build is **guarded**: top `CMakeLists.txt` `if(ATLAS_USE_CUDA)` → `enable_language(CUDA)`,
+  `CMAKE_CUDA_ARCHITECTURES 86`, `add_subdirectory(engine/cuda)`. CPU build (10/10 CTest)
+  stays green with the flag OFF; turning it ON on this Windows box fails fast (no nvcc) — by
+  design. `engine/cuda/CMakeLists.txt` builds `atlas_cuda` (links `atlas_engine`) + `test_device`.
+
 ## CUDA kernels (engine/cuda/) — tuned for NVIDIA A6000
+
+Step 2 onward. First kernel: tiled **matmul** (`y = x @ Wᵀ`, oracle `atlas::linear()`),
+riding the Step-1 infra; design in memory `phase2-matmul-kernel-plan`.
 
 | File | Kernel | Approach |
 |------|--------|----------|
@@ -45,9 +69,12 @@ A6000, SLURM). Jobs:
 
 | Script | Job |
 |--------|-----|
-| `build_cuda.sh` | compile CUDA kernels on a GPU node |
-| `benchmark.sh` | run the full benchmark suite, log to `results/` |
+| `build_cuda.sh` | LANDED — configure `-DATLAS_USE_CUDA=ON` + compile on an A6000 node |
+| `test_cuda.sh` | LANDED — `ctest -R test_device` (widens as kernel tests join) |
+| `benchmark.sh` | (later) run the benchmark suite, log to `results/` |
 | `embed_corpus.sh` | (used in Phase 3) embed the paper corpus on GPU |
 
-Typical loop: develop kernels locally → `sbatch slurm/build_cuda.sh` on HiPerGator →
-`sbatch slurm/benchmark.sh` → inspect tokens/sec, latency, memory in `results/`.
+Both landed scripts carry placeholder `#SBATCH` values (`<TODO:ACCOUNT/QOS/PARTITION>`,
+`<TODO:CUDA_MOD>`) — fill from the cluster before the first `sbatch`. Loop: edit
+`engine/cuda/` locally → git push / rsync to HiPerGator → `sbatch slurm/build_cuda.sh` →
+`sbatch slurm/test_cuda.sh` → iterate. CUDA never compiles on the Windows box.
