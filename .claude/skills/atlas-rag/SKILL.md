@@ -24,7 +24,8 @@ Corpus theme: **federated learning / differential privacy** papers (arXiv / Sema
 - Raw PDFs live in `data/papers/`, processed chunks in `data/chunks/` — **both gitignored**.
   Chunks carry metadata (source paper, section) so retrieval results stay citable, which the
   Phase 4 agent depends on for `cite_sources`.
-- Embeddings can be generated on HiPerGator via `slurm/embed_corpus.sh` for the full corpus.
+- Embeddings can be generated on the lab box's A6000 GPUs for the full corpus (pin a card
+  with `CUDA_VISIBLE_DEVICES` since it is shared).
 - Uncomment the Phase 3 deps in `requirements.txt`: `chromadb`, `sentence-transformers`,
   `pypdf`.
 

@@ -66,8 +66,8 @@ definition-of-done so green CI == a phase step is actually done:
   against the committed `reference/` oracles.
 - **Python:** install `requirements.txt` (conda or pip), lint, and run any
   `scripts/`/serving/rag/agent tests for phases that exist.
-- **CUDA (Phase 2+):** compiled and benchmarked on **HiPerGator via SLURM**
-  (`slurm/build_cuda.sh`, `slurm/benchmark.sh`), not in hosted CI runners.
+- **CUDA (Phase 2+):** compiled and benchmarked **directly on the lab A6000 box**
+  (`scripts/build_cuda.sh`, `scripts/test_cuda.sh`), not in hosted CI runners.
 
 Add CI jobs incrementally, one per phase as that phase comes online — don't scaffold a
 five-phase pipeline up front.

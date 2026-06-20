@@ -1,6 +1,6 @@
 ---
 name: atlas-cuda-serving
-description: Phase 2 — CUDA inference kernels plus the Python serving layer (engine/cuda/, server/, slurm/). Covers the fused A6000-tuned kernels, the pybind11 bridge, the FastAPI streaming endpoint, and the HiPerGator/SLURM build-and-benchmark workflow. Use when writing or reviewing CUDA kernels, the C++↔Python bridge, the FastAPI server, or SLURM job scripts.
+description: Phase 2 — CUDA inference kernels plus the Python serving layer (engine/cuda/, server/, scripts/build_cuda.sh + test_cuda.sh). Covers the fused A6000-tuned kernels, the pybind11 bridge, the FastAPI streaming endpoint, and the local build-and-test workflow on the dual-A6000 lab box (no SLURM). Use when writing or reviewing CUDA kernels, the C++↔Python bridge, the FastAPI server, or the CUDA build/test scripts.
 ---
 
 # Atlas Phase 2 — CUDA Kernels + Serving
@@ -62,19 +62,17 @@ riding the Step-1 infra; design in memory `phase2-matmul-kernel-plan`.
 - `/generate` **streams** tokens as they are produced (don't buffer the whole completion).
 - Uncomment the Phase 2 deps in `requirements.txt`: `fastapi`, `uvicorn`, `pybind11`.
 
-## HiPerGator / SLURM workflow (slurm/)
+## Build & test workflow (scripts/)
 
-CUDA is **not** built on the local Windows machine — it is pushed to HiPerGator (UF cluster,
-A6000, SLURM). Jobs:
+CUDA builds and runs **directly on the lab box** — `Suramar`, a self-contained Linux server
+with 2x NVIDIA RTX A6000 (Ampere, sm_86) attached, no SLURM/scheduler. Runners:
 
 | Script | Job |
 |--------|-----|
-| `build_cuda.sh` | LANDED — configure `-DATLAS_USE_CUDA=ON` + compile on an A6000 node |
-| `test_cuda.sh` | LANDED — `ctest -R test_device` (widens as kernel tests join) |
-| `benchmark.sh` | (later) run the benchmark suite, log to `results/` |
-| `embed_corpus.sh` | (used in Phase 3) embed the paper corpus on GPU |
+| `scripts/build_cuda.sh` | LANDED — configure `-DATLAS_USE_CUDA=ON` + compile into `build-cuda/` |
+| `scripts/test_cuda.sh` | LANDED — `nvidia-smi` + `ctest -R test_device` (widens as kernel tests join) |
+| benchmark (later) | run the benchmark suite, log to `results/` |
 
-Both landed scripts carry placeholder `#SBATCH` values (`<TODO:ACCOUNT/QOS/PARTITION>`,
-`<TODO:CUDA_MOD>`) — fill from the cluster before the first `sbatch`. Loop: edit
-`engine/cuda/` locally → git push / rsync to HiPerGator → `sbatch slurm/build_cuda.sh` →
-`sbatch slurm/test_cuda.sh` → iterate. CUDA never compiles on the Windows box.
+Loop: edit `engine/cuda/` → `scripts/build_cuda.sh` → `scripts/test_cuda.sh` → iterate. The
+box is shared and both A6000s are usually busy, so pin a card with `CUDA_VISIBLE_DEVICES=1`
+(check `nvidia-smi` first for the freer/cooler one); benchmark numbers will be noisy.

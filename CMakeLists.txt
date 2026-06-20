@@ -17,10 +17,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ATLAS_USE_CUDA "Build CUDA kernels (Phase 2)" OFF)
 
-# Phase 2 CUDA path, guarded OFF for the Windows CPU build (no nvcc here — CUDA is built
-# and validated only on HiPerGator via slurm/). When ON: enable the CUDA language, target
-# the A6000 (Ampere, sm_86), and pull in engine/cuda/. Nothing CUDA is referenced when OFF,
-# so Phase 1's build + 10/10 CTest suite is never disturbed.
+# Phase 2 CUDA path, guarded OFF so the CPU build needs no nvcc. Turned ON to build and
+# validate CUDA directly on the lab A6000 box (sm_86) via scripts/build_cuda.sh. When ON:
+# enable the CUDA language, target the A6000 (Ampere, sm_86), and pull in engine/cuda/.
+# Nothing CUDA is referenced when OFF, so Phase 1's build + 10/10 CTest suite is undisturbed.
 if (ATLAS_USE_CUDA)
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD 17)

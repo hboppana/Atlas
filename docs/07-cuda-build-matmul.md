@@ -1,6 +1,6 @@
-# Phase 2 · Step 1 — CUDA bring-up (build path, SLURM loop, `DeviceTensor`, validation harness)
+# Phase 2 · Step 1 — CUDA bring-up (build path, local GPU loop, `DeviceTensor`, validation harness)
 
-> Status: **in progress** — infra code landed (`engine/cuda/`, `slurm/`); SLURM scripts carry placeholder cluster values (account/partition/CUDA module) pending the first HiPerGator run, where the on-device validation happens. CPU build stays green with `ATLAS_USE_CUDA=OFF`.
+> Status: **in progress** — infra code landed (`engine/cuda/`, `scripts/build_cuda.sh`, `scripts/test_cuda.sh`); on-device validation runs directly on the lab A6000 box (no SLURM). CPU build stays green with `ATLAS_USE_CUDA=OFF`.
 > Predecessor: Phase 1 Addendum — test-suite hardening — **done** ([06-phase1-test-hardening.md](06-phase1-test-hardening.md))
 > Successor: Step 2 — the tiled **matmul** kernel, validated against the CPU `linear` oracle (first kernel to ride this infra)
 
@@ -16,8 +16,8 @@ Step 1 delivers four things:
 
 1. **The CUDA build path** — flip `ATLAS_USE_CUDA` on, enable the `CUDA` language in
    CMake, compile `engine/cuda/` with `nvcc` for the A6000 (sm_86).
-2. **The HiPerGator/SLURM loop** — develop locally, `sbatch` to a GPU node, read the
-   result back. CUDA is **never** built on the Windows dev machine.
+2. **The local GPU loop** — edit, build, and test directly on the lab box's A6000s. No
+   scheduler, no remote round-trip; the CPU build still works anywhere with the flag off.
 3. **A device-memory primitive** (`DeviceTensor`) — `cudaMalloc`/H2D/D2H with the same
    `owns` + move-only discipline as `tensor.h`, so device buffers can't silently leak or
    double-free.
@@ -88,34 +88,34 @@ mean the *infrastructure*, not a kernel. (A trivial scale-by-constant variant gi
 harness a non-zero expected output to diff against without introducing real algorithmic
 risk.)
 
-## Build & SLURM workflow
+## Build & test workflow
 
 ### CMake (`engine/cuda/CMakeLists.txt`, guarded by `ATLAS_USE_CUDA`)
 
 - Top-level `CMakeLists.txt` already declares `option(ATLAS_USE_CUDA ... OFF)`. Step 1
   adds, under that guard: `enable_language(CUDA)`, `set(CMAKE_CUDA_ARCHITECTURES 86)`
   (A6000 = Ampere, sm_86), and `add_subdirectory(engine/cuda)`.
-- The Windows CPU build **stays green with the flag off** — nothing CUDA is referenced
-  unless `ATLAS_USE_CUDA=ON`. The flag is only ever turned on on HiPerGator.
+- The CPU build **stays green with the flag off** — nothing CUDA is referenced unless
+  `ATLAS_USE_CUDA=ON`. The flag is turned on only on a CUDA-capable box.
 - CUDA compiles with `nvcc`; the host-side glue stays C++17.
 
-### `slurm/build_cuda.sh`
+### `scripts/build_cuda.sh` / `scripts/test_cuda.sh`
 
-Compiles the CUDA target on a GPU node: `module load cuda/12.x` (pin the exact version
-once confirmed on the cluster), configure with `-DATLAS_USE_CUDA=ON`, `cmake --build`.
-Requests an A6000 via `--gres=gpu:a6000:1` on the appropriate partition.
+Plain runners (no scheduler) for the lab A6000 box: `build_cuda.sh` configures with
+`-DATLAS_USE_CUDA=ON` into `build-cuda/` and `cmake --build`s it; `test_cuda.sh` prints
+`nvidia-smi` then runs `ctest -R test_device`. The box is shared and both A6000s are
+usually busy, so pin a card: `CUDA_VISIBLE_DEVICES=1 scripts/test_cuda.sh`.
 
 ### The loop
 
 ```
-edit engine/cuda/ locally  →  git push / rsync to HiPerGator
-   →  sbatch slurm/build_cuda.sh        # compile on a GPU node
-   →  sbatch slurm/test_cuda.sh         # run the round-trip test, report pass
-   →  iterate
+edit engine/cuda/  →  scripts/build_cuda.sh   # configure + compile into build-cuda/
+                   →  scripts/test_cuda.sh     # run the round-trip test, report pass
+                   →  iterate
 ```
 
-No CUDA compiler is assumed on the Windows machine; the only local check is that the
-CPU build/test suite still passes with `ATLAS_USE_CUDA=OFF`.
+The only portable check is that the CPU build/test suite still passes with
+`ATLAS_USE_CUDA=OFF`.
 
 ## Design decisions
 
@@ -141,13 +141,13 @@ CPU build/test suite still passes with `ATLAS_USE_CUDA=OFF`.
 | `engine/cuda/CMakeLists.txt` | new — builds the CUDA target + its test, guarded |
 | `engine/cuda/device_tensor.h` (+ `.cu`) | new — `DeviceTensor`, `to_device`/`to_host`, `CUDA_CHECK` |
 | `engine/cuda/tests/test_device.*` | new — round-trip / identity test proving build + copy + harness |
-| `slurm/build_cuda.sh` | new — compile CUDA on an A6000 node |
-| `slurm/test_cuda.sh` | new — run the round-trip test, report pass |
+| `scripts/build_cuda.sh` | new — configure + compile CUDA into `build-cuda/` on the lab A6000 box |
+| `scripts/test_cuda.sh` | new — run the round-trip test, report pass |
 | `docs/07-cuda-build-matmul.md` | this spec |
 
 ## Done when
 
-- `ATLAS_USE_CUDA=ON` builds cleanly on a HiPerGator A6000 node via `slurm/build_cuda.sh`.
+- `ATLAS_USE_CUDA=ON` builds cleanly on the lab A6000 box via `scripts/build_cuda.sh`.
 - The round-trip test passes on-device: a CPU `Tensor` copied H2D and back is bit-exact,
   `CUDA_CHECK` fires on injected failure, and the harness reports a diff.
 - The Windows CPU build + 10/10 CTest suite still pass with `ATLAS_USE_CUDA=OFF`.

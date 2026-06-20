@@ -27,7 +27,7 @@ C++/CUDA inference engine  →  Python serving  →  RAG  →  LangGraph agent  
 
 C++ · CUDA · Python · FastAPI · pybind11 · LangGraph · ChromaDB · sentence-transformers · MCP
 
-Built and benchmarked on HiPerGator (NVIDIA A6000) via SLURM.
+Built and benchmarked directly on a dual NVIDIA RTX A6000 Linux box.
 
 ## Setup
 

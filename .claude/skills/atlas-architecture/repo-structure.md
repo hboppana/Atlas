@@ -78,12 +78,9 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 │   ├── convert_weights.py      Convert .safetensors → raw binary for C++ mmap loading
 │   ├── validate.py             Compare Atlas output vs HuggingFace for correctness verification
 │   ├── benchmark.py            Measure tokens/sec, latency, memory usage across all phases
+│   ├── build_cuda.sh           Configure + compile CUDA into build-cuda/ on the lab A6000 box
+│   ├── test_cuda.sh            Run the CUDA bring-up test (ctest -R test_device) on the A6000 box
 │   └── ingest_papers.py        Bulk ingest arXiv PDFs on federated learning / differential privacy
-│
-├── slurm/                      HiPerGator SLURM job scripts
-│   ├── build_cuda.sh           SLURM job — compile CUDA kernels on A6000 GPU node
-│   ├── benchmark.sh            SLURM job — run full benchmark suite, log to results/
-│   └── embed_corpus.sh         SLURM job — generate embeddings for full paper corpus on GPU
 │
 ├── data/                       Paper corpus and processed chunks (gitignored except structure)
 │   ├── papers/                 Raw PDFs from arXiv / Semantic Scholar
@@ -97,4 +94,4 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 ## Stack
 
 C++ · CUDA · Python · FastAPI · pybind11 · LangGraph · ChromaDB · sentence-transformers ·
-MCP · HiPerGator (NVIDIA A6000)
+MCP · dual NVIDIA RTX A6000 (Linux)

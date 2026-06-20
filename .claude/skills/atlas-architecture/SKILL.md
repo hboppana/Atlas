@@ -20,7 +20,7 @@ C++/CUDA inference engine  →  Python serving  →  RAG  →  LangGraph agent  
 | Phase | Layer | Directory | Skill |
 |-------|-------|-----------|-------|
 | 1 | C++ inference engine (CPU baseline) | `engine/` | `atlas-cpp-engine` |
-| 2 | CUDA kernels + FastAPI serving | `engine/cuda/`, `server/`, `slurm/` | `atlas-cuda-serving` |
+| 2 | CUDA kernels + FastAPI serving | `engine/cuda/`, `server/` | `atlas-cuda-serving` |
 | 3 | RAG pipeline | `rag/` | `atlas-rag` |
 | 4 | LangGraph agent | `agent/` | `atlas-agent` |
 | 5 | MCP server | `mcp/` | `atlas-mcp` |
@@ -55,9 +55,11 @@ When working inside a phase, read that phase's skill for the detailed specs and 
 
 ## Dev environment & hardware
 
-- **Phase 1 is CPU-only and built locally on this Windows machine** (MSVC, C++17, FP32).
-- **CUDA work (Phase 2+) targets HiPerGator** — the UF cluster, NVIDIA A6000, SLURM. CUDA
-  builds and GPU benchmarks are pushed there via the scripts in `slurm/`.
+- **Phase 1 is CPU-only** (C++17, FP32) and builds anywhere with a C++ toolchain.
+- **CUDA work (Phase 2+) runs directly on the lab box** — a self-contained Linux server
+  (`Suramar`) with 2x NVIDIA RTX A6000 (Ampere, sm_86) attached, no SLURM/scheduler. CUDA
+  builds and GPU benchmarks run via `scripts/build_cuda.sh` / `scripts/test_cuda.sh`,
+  pinning a card with `CUDA_VISIBLE_DEVICES` since the box is shared.
 - The corpus theme is **federated learning / differential privacy** papers (arXiv /
   Semantic Scholar).
 
@@ -70,8 +72,7 @@ atlas/
   rag/            Phase 3 — ingest, embed, store, retrieve
   agent/          Phase 4 — LangGraph graph, nodes, tools, state
   mcp/            Phase 5 — MCP server + registered tools
-  scripts/        download_weights, convert_weights, validate, benchmark, ingest_papers
-  slurm/          HiPerGator SLURM jobs (build_cuda, benchmark, embed_corpus)
+  scripts/        download_weights, convert_weights, build_cuda, test_cuda, ingest_papers
   data/           papers/ + chunks/ (gitignored contents)
   weights/        model weights (gitignored, populated by download_weights.py)
   reference/      golden test oracles (NOT gitignored — small, used as test fixtures)
