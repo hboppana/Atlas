@@ -1,6 +1,6 @@
 # Phase 2 · Step 1 — CUDA bring-up (build path, local GPU loop, `DeviceTensor`, validation harness)
 
-> Status: **in progress** — infra code landed (`engine/cuda/`, `scripts/build_cuda.sh`, `scripts/test_cuda.sh`); on-device validation runs directly on the lab A6000 box (no SLURM). CPU build stays green with `ATLAS_USE_CUDA=OFF`.
+> Status: **done** — infra code landed (`engine/cuda/`, `scripts/build_cuda.sh`, `scripts/test_cuda.sh`); the `test_device` round-trip passes on the lab A6000 box (no SLURM), and the CPU build stays green at 10/10 with `ATLAS_USE_CUDA=OFF`. Step 2 (matmul) is next.
 > Predecessor: Phase 1 Addendum — test-suite hardening — **done** ([06-phase1-test-hardening.md](06-phase1-test-hardening.md))
 > Successor: Step 2 — the tiled **matmul** kernel, validated against the CPU `linear` oracle (first kernel to ride this infra)
 
