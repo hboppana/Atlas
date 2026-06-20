@@ -1,8 +1,8 @@
 # Model weights (downloaded by scripts/download_weights.py)
 weights/
 
-# C++ build output
-build/
+# C++ / CUDA build output (out-of-source trees: build/, build-cuda/, ...)
+build*/
 *.o
 *.obj
 *.exe

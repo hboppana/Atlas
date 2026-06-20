@@ -12,10 +12,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Match the cmake that built build-cuda/ (3.20 pip --user install), not the 3.18 system one.
+# Override with CTEST=/path/to/ctest. See scripts/build_cuda.sh for the same pinning rationale.
+CTEST="${CTEST:-$([ -x "$HOME/.local/bin/ctest" ] && echo "$HOME/.local/bin/ctest" || command -v ctest)}"
+
 nvidia-smi
 
 # Just the device bring-up test for now; later kernel tests join this target and the -R
 # filter can widen (e.g. -R 'test_device|test_matmul').
-ctest --test-dir build-cuda -R test_device --output-on-failure
+"$CTEST" --test-dir build-cuda -R test_device --output-on-failure
 
 echo "test_cuda: done"
