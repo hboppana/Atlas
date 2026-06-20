@@ -155,5 +155,5 @@ The only portable check is that the CPU build/test suite still passes with
 ## Next (Step 2)
 
 The tiled **matmul** kernel (`y = x @ Wᵀ`, validated against `atlas::linear()`) is the
-first real kernel and rides entirely on this infra. Its design is captured in memory
-(`phase2-matmul-kernel-plan`) and gets its own doc when Step 2 begins.
+first real kernel and rides entirely on this infra. Its design is captured in
+[08-cuda-matmul.md](08-cuda-matmul.md).
