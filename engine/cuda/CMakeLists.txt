@@ -5,6 +5,7 @@
 
 add_library(atlas_cuda STATIC
     device_tensor.cu
+    matmul.cu
 )
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
@@ -20,3 +21,8 @@ set_target_properties(atlas_cuda PROPERTIES
 add_executable(test_device tests/test_device.cu)
 target_link_libraries(test_device PRIVATE atlas_cuda)
 add_test(NAME test_device COMMAND test_device)
+
+# Step 2 matmul validation vs the linear() oracle, same harness as test_device.
+add_executable(test_matmul tests/test_matmul.cu)
+target_link_libraries(test_matmul PRIVATE atlas_cuda)
+add_test(NAME test_matmul COMMAND test_matmul)

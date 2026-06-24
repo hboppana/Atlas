@@ -21,50 +21,7 @@
 #include "../cuda_check.h"
 #include "../device_tensor.h"
 #include "../../include/tensor.h"
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::printf("  FAIL %s:%d  CHECK(%s)\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
-
-// The reusable diff harness — the pattern every later kernel reuses. Reports max-abs and
-// mean-abs element-wise diff between a GPU result and its CPU oracle. The Phase 1 method:
-// MEASURE the diff on the first green run, then PIN it as the gate (never guess a tolerance
-// up front). Step 2 drops in linear()'s output as `ref` with no changes here.
-struct Diff {
-    double max_abs = 0.0;
-    double mean_abs = 0.0;
-};
-
-static Diff compare(const atlas::Tensor& got, const atlas::Tensor& ref) {
-    const int64_t n = got.numel();
-    Diff d;
-    double sum = 0.0;
-    for (int64_t i = 0; i < n; ++i) {
-        const double e = std::fabs(static_cast<double>(got.data[i]) -
-                                   static_cast<double>(ref.data[i]));
-        if (e > d.max_abs) d.max_abs = e;
-        sum += e;
-    }
-    d.mean_abs = n > 0 ? sum / static_cast<double>(n) : 0.0;
-    return d;
-}
-
-// A deterministic fill so runs are reproducible (Phase 1 PRNG convention). A plain LCG —
-// no <random> engine dependence across platforms.
-static void fill_prng(atlas::Tensor& t, uint32_t seed) {
-    uint32_t s = seed;
-    const int64_t n = t.numel();
-    for (int64_t i = 0; i < n; ++i) {
-        s = s * 1664525u + 1013904223u;
-        t.data[i] = (static_cast<float>(s >> 8) / static_cast<float>(1u << 24)) - 0.5f;  // ~[-0.5,0.5)
-    }
-}
+#include "test_harness.h"  // CHECK + g_failures, Diff/compare, fill_prng
 
 // Round-trip / identity: H2D -> scale(1.0) -> D2H must be BIT-EXACT to the input. A
 // non-tile-aligned, multi-dim shape exercises the grid-stride loop's remainder handling.
