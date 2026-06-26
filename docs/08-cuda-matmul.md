@@ -2,7 +2,7 @@
 
 > Status: **planned** — design only; no kernel code yet.
 > Predecessor: Step 1 — CUDA bring-up infra — **done** ([07-cuda-build-matmul.md](07-cuda-build-matmul.md))
-> Successor: the remaining kernels (RMSNorm, RoPE, attention, SwiGLU activation) ride the same infra + harness, then the full GPU forward pass validated against `reference/logits.npy`.
+> Successor: Step 3 — the fused **RMSNorm** kernel, validated against `atlas::rmsnorm()` ([09-cuda-rmsnorm.md](09-cuda-rmsnorm.md)); then the remaining kernels (RoPE, SwiGLU activation, attention) ride the same infra + harness, then the full GPU forward pass validated against `reference/logits.npy`.
 
 ## Goal
 
