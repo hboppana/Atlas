@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "Linux-CUDA",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/cuda-12.6/targets/x86_64-linux/include"
+            ],
+            "defines": ["ATLAS_USE_CUDA"],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
