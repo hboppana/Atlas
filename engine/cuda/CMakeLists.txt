@@ -6,6 +6,7 @@
 add_library(atlas_cuda STATIC
     device_tensor.cu
     matmul.cu
+    rmsnorm.cu
 )
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
@@ -26,3 +27,8 @@ add_test(NAME test_device COMMAND test_device)
 add_executable(test_matmul tests/test_matmul.cu)
 target_link_libraries(test_matmul PRIVATE atlas_cuda)
 add_test(NAME test_matmul COMMAND test_matmul)
+
+# Step 3 RMSNorm validation vs the rmsnorm() oracle, same harness.
+add_executable(test_rmsnorm tests/test_rmsnorm.cu)
+target_link_libraries(test_rmsnorm PRIVATE atlas_cuda)
+add_test(NAME test_rmsnorm COMMAND test_rmsnorm)

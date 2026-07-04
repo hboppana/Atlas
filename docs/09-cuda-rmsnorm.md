@@ -1,6 +1,8 @@
 # Phase 2 · Step 3 — fused RMSNorm kernel (`out = x · rsqrt(mean(x²)+eps) · w`, validated against `rmsnorm()`)
 
-> Status: **planned** — design only; no kernel code yet.
+> Status: **done** — kernel validated on the lab A6000 (Suramar, CUDA 12.6).
+> Measured tolerance (first green run): worst case `max-abs=5.36e-07` (prefill m=8 n=2048).
+> Pinned gate: `1e-5` (~19x headroom over measured; ~6 OOM under a real-bug signal).
 > Predecessor: Step 2 — tiled matmul kernel — **done** ([08-cuda-matmul.md](08-cuda-matmul.md))
 > Successor: the remaining kernels (RoPE, SwiGLU activation, fused attention) ride the same infra + harness, then the full GPU forward pass validated against `reference/logits.npy`.
 
