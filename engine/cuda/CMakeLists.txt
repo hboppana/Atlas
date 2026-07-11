@@ -7,6 +7,7 @@ add_library(atlas_cuda STATIC
     device_tensor.cu
     matmul.cu
     rmsnorm.cu
+    kernels.cu
 )
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
