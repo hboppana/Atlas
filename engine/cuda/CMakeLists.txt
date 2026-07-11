@@ -33,3 +33,8 @@ add_test(NAME test_matmul COMMAND test_matmul)
 add_executable(test_rmsnorm tests/test_rmsnorm.cu)
 target_link_libraries(test_rmsnorm PRIVATE atlas_cuda)
 add_test(NAME test_rmsnorm COMMAND test_rmsnorm)
+
+# Step 4 utility kernels (embed/add/swiglu/rope) vs their CPU oracles, same harness.
+add_executable(test_kernels tests/test_kernels.cu)
+target_link_libraries(test_kernels PRIVATE atlas_cuda)
+add_test(NAME test_kernels COMMAND test_kernels)

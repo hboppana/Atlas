@@ -1,6 +1,9 @@
 # Phase 2 · Step 4 — Utility kernels (`launch_embed`, `launch_add`, `launch_swiglu`, `launch_rope`)
 
-> Status: **planned** — design only; no kernel code yet.
+> Status: **done** — all four kernels validated on the lab A6000 (Suramar, CUDA 12.6).
+> Measured (first green run): `embed`/`add` bit-exact (`max-abs=0`, pinned `0`);
+> `swiglu` worst `max-abs=1.49e-08` (`[_,5632]`), pinned `1e-6` (~67x headroom);
+> `rope` worst `max-abs=5.96e-08` (= 2⁻²⁴; q-decode bit-exact — pos=0 is identity), pinned `1e-6` (~17x headroom).
 > Predecessor: Step 3 — fused RMSNorm kernel — **done** ([09-cuda-rmsnorm.md](09-cuda-rmsnorm.md))
 > Successor: Step 5 — fused attention kernel (`attention.cu`), then Step 6 — full GPU forward pass.
 
