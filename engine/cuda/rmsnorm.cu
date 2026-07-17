@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 
 #include "cuda_check.h"
+#include "reduce.cuh"
 
 namespace atlas {
 
@@ -23,31 +24,6 @@ namespace {
 
 constexpr int BLOCK = 256;
 constexpr int WARP = 32;
-
-// Reduce `val` across the whole block to a single sum, returned to every thread. Warp-level
-// shuffle first, one partial per warp into shared, then the first warp reduces those.
-__device__ float block_reduce_sum(float val, float* warp_sums) {
-    const int lane = threadIdx.x % WARP;
-    const int warp = threadIdx.x / WARP;
-
-    #pragma unroll
-    for (int offset = WARP / 2; offset > 0; offset >>= 1)
-        val += __shfl_down_sync(0xffffffffu, val, offset);
-
-    if (lane == 0) warp_sums[warp] = val;
-    __syncthreads();
-
-    // First warp reduces the per-warp partials. BLOCK/WARP warps (=8 for BLOCK=256), so the
-    // first warp's lanes cover them; lanes past the warp count read 0.
-    constexpr int NWARPS = BLOCK / WARP;
-    float total = (threadIdx.x < NWARPS) ? warp_sums[threadIdx.x] : 0.0f;
-    if (warp == 0) {
-        #pragma unroll
-        for (int offset = NWARPS / 2; offset > 0; offset >>= 1)
-            total += __shfl_down_sync(0xffffffffu, total, offset);
-    }
-    return total;  // valid in lane 0 of warp 0; broadcast via shared below.
-}
 
 // out[i][j] = x[i][j] · rsqrt(mean(x²)+eps) · w[j]. grid.x = m (one block per row).
 __global__ void rmsnorm_kernel(const float* __restrict__ x,
@@ -69,7 +45,7 @@ __global__ void rmsnorm_kernel(const float* __restrict__ x,
         ss += v * v;
     }
 
-    ss = block_reduce_sum(ss, warp_sums);
+    ss = block_reduce_sum<BLOCK>(ss, warp_sums);
 
     if (threadIdx.x == 0)
         scale_bc = rsqrtf(ss / static_cast<float>(n) + eps);

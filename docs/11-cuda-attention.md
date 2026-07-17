@@ -1,6 +1,7 @@
 # Phase 2 · Step 5 — fused attention kernel (`ctx = softmax(q·kᵀ/√hd, causal) · v`, validated against `attention()`)
 
-> Status: **planned** — design only; no kernel code yet.
+> Status: **done** — landed and validated on the A6000 (CUDA 12.6): 5/5 CTest, worst
+> measured max-abs 8.94e-08, pinned at 1e-6.
 > Predecessor: Step 4 — utility kernels (`embed`/`add`/`swiglu`/`rope`) — **done** ([10-cuda-kernels.md](10-cuda-kernels.md))
 > Successor: Step 6 — full GPU forward pass (`Model::forward_gpu()`), validated against `reference/logits.npy`.
 
@@ -70,10 +71,13 @@ and the `denom` sum reorder (one ≤seq-term reduction — the rmsnorm-class dif
 else matches the oracle's arithmetic order. Expected ~1e-6 scale; measured then pinned.
 
 **Shared reduction header — `engine/cuda/reduce.cuh` (new).** `block_reduce_sum` is lifted
-verbatim from `rmsnorm.cu`'s anonymous namespace, plus the `block_reduce_max` variant
-(same warp-shuffle two-level shape, `fmaxf`/`-INFINITY` instead of `+`/`0`); `rmsnorm.cu`
-switches to including it. Behavior-identical refactor — `test_rmsnorm`'s pinned tolerance
-is the guard.
+from `rmsnorm.cu`'s anonymous namespace, plus the `block_reduce_max` variant (same
+warp-shuffle two-level shape, `fmaxf`/`-INFINITY` instead of `+`/`0`); `rmsnorm.cu`
+switches to including it. One departure from "verbatim": the functions are **templated on
+the block size** — rmsnorm's copy hardcoded `BLOCK = 256`, and attention runs 128, so the
+shared version takes it as a template parameter (`block_reduce_sum<BLOCK>`). Otherwise
+behavior-identical — `test_rmsnorm`'s pinned tolerance is the guard, re-run green after
+the switch.
 
 ## Host API (`engine/cuda/attention.h` / `attention.cu`)
 
@@ -116,6 +120,13 @@ Named `test_attention_gpu` — Phase 1 already registers CTest target `test_atte
 
 Each case reports max-abs/mean-abs and asserts the pinned tolerance. Blob-free, random
 inputs. `test_rmsnorm` re-run in the same suite guards the `reduce.cuh` extraction.
+
+**Measured (A6000, CUDA 12.6) → pinned.** Worst cases prefill and long-seq, both
+max-abs = 8.94e-08 (mean-abs ~6e-09); small-gqa/mha-edge 2.98e-08; decode **exactly 0** —
+a single-key softmax is exactly 1.0 (`__expf(0)/1`), so ctx is a bit-exact copy of v's
+row on both paths. Below rmsnorm's 5.36e-07 despite the extra `__expf`, because softmax
+probs are ≤ 1 and inputs are ~[-0.5, 0.5). **Pinned at 1e-6** — ~11x headroom over the
+measured worst, ~five orders of magnitude below a real-bug signal.
 
 ## Build & test workflow (unchanged loop)
 

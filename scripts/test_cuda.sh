@@ -18,8 +18,8 @@ CTEST="${CTEST:-$([ -x "$HOME/.local/bin/ctest" ] && echo "$HOME/.local/bin/ctes
 
 nvidia-smi
 
-# Step 1 device bring-up + Step 2 matmul + Step 3 RMSNorm + Step 4 utility kernels.
-# Later kernel tests join this -R filter.
-"$CTEST" --test-dir build-cuda -R 'test_device|test_matmul|test_rmsnorm|test_kernels' --output-on-failure
+# Step 1 device bring-up + Step 2 matmul + Step 3 RMSNorm + Step 4 utility kernels +
+# Step 5 fused attention. Later kernel tests join this -R filter.
+"$CTEST" --test-dir build-cuda -R 'test_device|test_matmul|test_rmsnorm|test_kernels|test_attention_gpu' --output-on-failure
 
 echo "test_cuda: done"

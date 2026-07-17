@@ -33,15 +33,19 @@ no-math round-trip. What exists in `engine/cuda/`:
 
 ## CUDA kernels (engine/cuda/) — tuned for NVIDIA A6000
 
-Step 2 onward. First kernel: tiled **matmul** (`y = x @ Wᵀ`, oracle `atlas::linear()`),
-riding the Step-1 infra; design in memory `phase2-matmul-kernel-plan`.
+Steps 2–5 LANDED and validated on the A6000 — every op in TinyLlama's forward pass now has
+a proven GPU counterpart; Step 6 (full GPU forward pass vs `reference/logits.npy`) is next.
 
 | File | Kernel | Approach |
 |------|--------|----------|
-| `matmul.cu` | tiled matrix multiply | shared-memory tiling, coalesced global access |
-| `attention.cu` | fused attention | Q·Kᵀ → softmax → ·V in a single launch (GQA-aware, 8:1) |
-| `layernorm.cu` | fused RMSNorm | single-pass mean+variance, warp-level reduction |
-| `kernels.cu` | utility kernels | GELU/SwiGLU activation, residual add, embedding lookup |
+| `matmul.cu` | tiled matrix multiply (docs/08) | shared-memory tiling, coalesced global access |
+| `rmsnorm.cu` | fused RMSNorm (docs/09) | single-pass block-per-row, warp-shuffle reduction |
+| `kernels.cu` | utility kernels (docs/10) | embed gather, residual add, SwiGLU, RoPE |
+| `attention.cu` | fused causal GQA attention (docs/11) | Q·Kᵀ → softmax → ·V in one launch, block per (query, head), score row in dynamic smem (seq ≤ 12288); flash-style rewrite is the named perf follow-up |
+| `reduce.cuh` | — | shared `block_reduce_sum`/`block_reduce_max`, templated on block size (rmsnorm 256, attention 128) |
+
+Each kernel is validated in `tests/test_*.cu` against its CPU oracle with a
+measured-then-pinned max-abs tolerance (attention: measured 8.94e-08 worst, pinned 1e-6).
 
 - **Correctness before speed.** Match the CPU/HuggingFace reference first, then optimize
   (occupancy, memory coalescing, shared-memory tiling). Benchmark with `scripts/benchmark.py`.

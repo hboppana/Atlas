@@ -8,6 +8,7 @@ add_library(atlas_cuda STATIC
     matmul.cu
     rmsnorm.cu
     kernels.cu
+    attention.cu
 )
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
@@ -38,3 +39,9 @@ add_test(NAME test_rmsnorm COMMAND test_rmsnorm)
 add_executable(test_kernels tests/test_kernels.cu)
 target_link_libraries(test_kernels PRIVATE atlas_cuda)
 add_test(NAME test_kernels COMMAND test_kernels)
+
+# Step 5 fused attention vs the attention() oracle, same harness. Named test_attention_gpu
+# because Phase 1 owns the CTest name test_attention and build-cuda/ builds both suites.
+add_executable(test_attention_gpu tests/test_attention_gpu.cu)
+target_link_libraries(test_attention_gpu PRIVATE atlas_cuda)
+add_test(NAME test_attention_gpu COMMAND test_attention_gpu)

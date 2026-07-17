@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 
 #include "cuda_check.h"
+#include "reduce.cuh"
 
 namespace atlas {
 
@@ -23,60 +24,15 @@ namespace atlas {
 //      a register, deliberately *not* a parallel reduction: the same j-order as the
 //      oracle's loop, so the only phase-3 diff is FMA contraction.
 //
-// The reductions duplicate rmsnorm.cu's warp-shuffle two-level shape (this step was
-// scoped to attention.{h,cu}; the reduce.cuh extraction that de-duplicates them is the
-// named follow-up in docs/11-cuda-attention.md).
+// Both block reductions come from the shared reduce.cuh (the sum lifted from rmsnorm.cu,
+// the max variant added for attention) — one copy, guarded by test_rmsnorm's pinned
+// tolerance.
 
 namespace {
 
 constexpr int BLOCK = 128;
 constexpr int WARP = 32;
 constexpr int NWARPS = BLOCK / WARP;
-
-// Reduce `val` across the block to a single sum. Warp-level shuffle first, one partial
-// per warp into shared, then the first warp reduces those. Valid in lane 0 of warp 0;
-// callers broadcast via shared.
-__device__ float block_reduce_sum(float val, float* warp_partials) {
-    const int lane = threadIdx.x % WARP;
-    const int warp = threadIdx.x / WARP;
-
-    #pragma unroll
-    for (int offset = WARP / 2; offset > 0; offset >>= 1)
-        val += __shfl_down_sync(0xffffffffu, val, offset);
-
-    if (lane == 0) warp_partials[warp] = val;
-    __syncthreads();
-
-    float total = (threadIdx.x < NWARPS) ? warp_partials[threadIdx.x] : 0.0f;
-    if (warp == 0) {
-        #pragma unroll
-        for (int offset = NWARPS / 2; offset > 0; offset >>= 1)
-            total += __shfl_down_sync(0xffffffffu, total, offset);
-    }
-    return total;
-}
-
-// Same two-level shape with fmaxf / -INFINITY in place of + / 0. Exact regardless of
-// order — max is order-insensitive, so this phase contributes no GPU↔CPU diff.
-__device__ float block_reduce_max(float val, float* warp_partials) {
-    const int lane = threadIdx.x % WARP;
-    const int warp = threadIdx.x / WARP;
-
-    #pragma unroll
-    for (int offset = WARP / 2; offset > 0; offset >>= 1)
-        val = fmaxf(val, __shfl_down_sync(0xffffffffu, val, offset));
-
-    if (lane == 0) warp_partials[warp] = val;
-    __syncthreads();
-
-    float total = (threadIdx.x < NWARPS) ? warp_partials[threadIdx.x] : -INFINITY;
-    if (warp == 0) {
-        #pragma unroll
-        for (int offset = NWARPS / 2; offset > 0; offset >>= 1)
-            total = fmaxf(total, __shfl_down_sync(0xffffffffu, total, offset));
-    }
-    return total;
-}
 
 // ctx[i,hq,:] = softmax(q[i,hq,:]·kᵀ/√hd, causal) · v. grid = (seq, n_heads); dynamic
 // shared memory holds the score row (seq floats; only [0, i] is used).
@@ -110,7 +66,7 @@ __global__ void attention_kernel(const float* __restrict__ q,
         local_max = fmaxf(local_max, sc);
     }
 
-    const float m = block_reduce_max(local_max, warp_partials);
+    const float m = block_reduce_max<BLOCK>(local_max, warp_partials);
     if (threadIdx.x == 0) bc = m;
     __syncthreads();  // broadcasts bc; also fences warp_partials for reuse below
     const float row_max = bc;
@@ -123,7 +79,7 @@ __global__ void attention_kernel(const float* __restrict__ q,
         local_sum += e;
     }
 
-    const float s = block_reduce_sum(local_sum, warp_partials);
+    const float s = block_reduce_sum<BLOCK>(local_sum, warp_partials);
     if (threadIdx.x == 0) bc = s;
     __syncthreads();  // broadcasts denom; fences every scores[j] write for phase 3
     const float denom = bc;
