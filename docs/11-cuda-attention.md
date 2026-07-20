@@ -3,7 +3,7 @@
 > Status: **done** — landed and validated on the A6000 (CUDA 12.6): 5/5 CTest, worst
 > measured max-abs 8.94e-08, pinned at 1e-6.
 > Predecessor: Step 4 — utility kernels (`embed`/`add`/`swiglu`/`rope`) — **done** ([10-cuda-kernels.md](10-cuda-kernels.md))
-> Successor: Step 6 — full GPU forward pass (`Model::forward_gpu()`), validated against `reference/logits.npy`.
+> Successor: Step 6 — full GPU forward pass (`GpuModel::forward()`), validated against `reference/logits.npy` ([12-cuda-forward.md](12-cuda-forward.md)).
 
 ## Goal
 
