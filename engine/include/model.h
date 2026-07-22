@@ -70,6 +70,13 @@ void attention(const Tensor& q, const Tensor& k, const Tensor& v,
 // SwiGLU gating, in place in gate: gate = SiLU(gate) * up, SiLU(z) = z * sigmoid(z).
 void swiglu(Tensor& gate, const Tensor& up);
 
+// Precompute the RoPE cos/sin tables for seq positions: [seq, head_dim] each, the
+// head_dim/2 angles concatenated with themselves (the half-split layout rope() expects).
+// Both out-params are (re)sized to [seq, head_dim]. Lifted out of Model::forward() so the
+// CPU pass and the CUDA pass (engine/cuda/forward.cu) share one copy of the table math
+// rather than risking silent divergence — docs/12-cuda-forward.md.
+void rope_tables(int64_t seq, const Config& cfg, Tensor& cos, Tensor& sin);
+
 // Owns the mmap of model.f32.bin and hands out non-owning Tensor views into it, by name.
 // This is the first real use of tensor.h's owns=false path: the 4.4 GB blob is mapped
 // once and never copied — every weight is a Tensor::view window onto the mapping. The
@@ -95,6 +102,14 @@ struct WeightStore {
     // Aborts if the name is absent — names come from the model code, not user input.
     const Tensor& get(const std::string& name) const;
     bool has(const std::string& name) const;
+
+    // The mapped blob itself, for consumers that need to move or address it wholesale
+    // rather than tensor by tensor — the CUDA path uploads [base(), base()+size_bytes())
+    // in one H2D memcpy and then derives each device weight as a view at the same offset
+    // as its host view (docs/12-cuda-forward.md). Read-only; the views remain the
+    // supported way to reach an individual weight.
+    const float* base() const { return base_; }
+    size_t size_bytes() const { return size_bytes_; }
 
 private:
     // Platform-opaque mmap state (Win32 CreateFileMapping/MapViewOfFile under the hood),

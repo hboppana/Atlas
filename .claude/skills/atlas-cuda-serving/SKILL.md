@@ -33,8 +33,10 @@ no-math round-trip. What exists in `engine/cuda/`:
 
 ## CUDA kernels (engine/cuda/) — tuned for NVIDIA A6000
 
-Steps 2–5 LANDED and validated on the A6000 — every op in TinyLlama's forward pass now has
-a proven GPU counterpart; Step 6 (full GPU forward pass vs `reference/logits.npy`) is next.
+Steps 2–6 LANDED and validated on the A6000 — every op in TinyLlama's forward pass has a
+proven GPU counterpart, and Step 6 composed them into the full on-device forward pass
+(`forward.cu`, measured 2.04e-4 max-abs vs `reference/logits.npy`, CTest 6/6). Step 7
+(greedy decode loop → pybind11 bridge → FastAPI) is next.
 
 | File | Kernel | Approach |
 |------|--------|----------|
@@ -43,6 +45,7 @@ a proven GPU counterpart; Step 6 (full GPU forward pass vs `reference/logits.npy
 | `kernels.cu` | utility kernels (docs/10) | embed gather, residual add, SwiGLU, RoPE |
 | `attention.cu` | fused causal GQA attention (docs/11) | Q·Kᵀ → softmax → ·V in one launch, block per (query, head), score row in dynamic smem (seq ≤ 12288); flash-style rewrite is the named perf follow-up |
 | `reduce.cuh` | — | shared `block_reduce_sum`/`block_reduce_max`, templated on block size (rmsnorm 256, attention 128) |
+| `forward.cu` | `GpuModel`, full forward pass (docs/12) | 4.4 GB blob uploaded once at `create()`, weights are zero-copy `DeviceTensor::view`s at their host offsets; launch order held to `Model::forward()`. FP32 only (`qweights` ignored); per-launch syncs + per-call scratch kept deliberately — both are named perf follow-ups |
 
 Each kernel is validated in `tests/test_*.cu` against its CPU oracle with a
 measured-then-pinned max-abs tolerance (attention: measured 8.94e-08 worst, pinned 1e-6).

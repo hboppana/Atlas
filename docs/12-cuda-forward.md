@@ -1,6 +1,7 @@
 # Phase 2 · Step 6 — full GPU forward pass (`GpuModel::forward()`, validated against `reference/logits.npy`)
 
-> Status: **spec** — not yet implemented.
+> Status: **done** — validated on Suramar (A6000, sm_86), 2026-07-22. CTest 6/6 in
+> `build-cuda/`, CPU 10/10.
 > Predecessor: Step 5 — fused attention kernel — **done** ([11-cuda-attention.md](11-cuda-attention.md))
 > Successor: Step 7 — token generation loop (greedy decode) en route to the pybind11 bridge
 > + FastAPI serving.
@@ -150,6 +151,18 @@ same order of magnitude, ~1e-4 to 1e-3. **Measure on first green run, then pin**
 per the standing rule. The CPU pins (1.5e-3 / 1e-4) are the sanity reference: a GPU
 measurement far above 1e-3 max-abs is a bug signal, not a tolerance to accommodate.
 Argmax agreement at all 6 positions is binary and non-negotiable.
+
+**Measured** (first green run, 2026-07-22): GPU vs HF `max_abs=2.04e-4`,
+`mean_abs=8.10e-6` — the predicted order of magnitude, right alongside the CPU engine's
+1.44e-4 / 8.27e-6. Pinned at `2e-3` / `8e-5`. Per-row argmax matched the reference at all
+6 positions and the last row decoded to "Paris" (id 3681, logit 13.39). The attribution
+diagnostic read GPU vs CPU `max_abs=8.01e-5`, `mean_abs=6.18e-6` — smaller than either
+side's gap to HF, i.e. the two engines agree with each other more closely than either
+agrees with PyTorch, which is what a correct composition should look like.
+
+Informational wall-clock from the same run: `GpuModel::create` 1.08 s (the one-time 4.4 GB
+upload), then GPU forward 0.053 s vs CPU forward 7.15 s — ~134x, with every launcher still
+paying its `CUDA_CHECK_KERNEL()` sync. Not a benchmark; see the perf follow-ups.
 
 Also print wall-clock for `GpuModel::forward` vs `Model::forward` — informational only
 (shared box, noisy), not asserted; the real benchmark pass comes later.

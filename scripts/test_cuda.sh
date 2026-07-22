@@ -19,7 +19,8 @@ CTEST="${CTEST:-$([ -x "$HOME/.local/bin/ctest" ] && echo "$HOME/.local/bin/ctes
 nvidia-smi
 
 # Step 1 device bring-up + Step 2 matmul + Step 3 RMSNorm + Step 4 utility kernels +
-# Step 5 fused attention. Later kernel tests join this -R filter.
-"$CTEST" --test-dir build-cuda -R 'test_device|test_matmul|test_rmsnorm|test_kernels|test_attention_gpu' --output-on-failure
+# Step 5 fused attention + Step 6 full GPU forward pass. Later kernel tests join this
+# -R filter. test_forward_gpu SKIPs green without the local weight blob.
+"$CTEST" --test-dir build-cuda -R 'test_device|test_matmul|test_rmsnorm|test_kernels|test_attention_gpu|test_forward_gpu' --output-on-failure
 
 echo "test_cuda: done"

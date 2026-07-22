@@ -9,6 +9,7 @@ add_library(atlas_cuda STATIC
     rmsnorm.cu
     kernels.cu
     attention.cu
+    forward.cu
 )
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
@@ -45,3 +46,14 @@ add_test(NAME test_kernels COMMAND test_kernels)
 add_executable(test_attention_gpu tests/test_attention_gpu.cu)
 target_link_libraries(test_attention_gpu PRIVATE atlas_cuda)
 add_test(NAME test_attention_gpu COMMAND test_attention_gpu)
+
+# Step 6 full GPU forward pass vs reference/logits.npy — the first CUDA test that needs the
+# on-disk artifacts, so it takes the path defines from engine/CMakeLists.txt's pattern. Both
+# are absolute at configure time; the test SKIPs green when the (gitignored) weight blob is
+# absent, exactly like the CPU test_forward.
+add_executable(test_forward_gpu tests/test_forward_gpu.cu)
+target_link_libraries(test_forward_gpu PRIVATE atlas_cuda)
+target_compile_definitions(test_forward_gpu PRIVATE
+    ATLAS_REFERENCE_DIR="${CMAKE_SOURCE_DIR}/reference"
+    ATLAS_WEIGHTS_DIR="${CMAKE_SOURCE_DIR}/weights/tinyllama-1.1b-chat")
+add_test(NAME test_forward_gpu COMMAND test_forward_gpu)

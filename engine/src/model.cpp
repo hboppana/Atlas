@@ -103,6 +103,30 @@ void rope(Tensor& x, const Tensor& cos, const Tensor& sin, int n_heads, int head
     }
 }
 
+// The tables rope() consumes: inv_freq[i] = 1/theta^(2i/head_dim) for i in [0, head_dim/2),
+// angle = pos * inv_freq[i], written into BOTH halves of the row so rope() needs no
+// index folding. Shared by Model::forward() and the CUDA forward pass — one copy of the
+// math, so the two paths cannot drift (docs/12-cuda-forward.md).
+void rope_tables(int64_t seq, const Config& cfg, Tensor& cos, Tensor& sin) {
+    const int hd = cfg.head_dim;
+    const int half = hd / 2;
+    cos = Tensor::zeros({seq, hd});
+    sin = Tensor::zeros({seq, hd});
+    for (int64_t pos = 0; pos < seq; ++pos) {
+        for (int i = 0; i < half; ++i) {
+            const float inv_freq =
+                1.0f / std::pow(cfg.rope_theta, static_cast<float>(2 * i) / static_cast<float>(hd));
+            const float angle = static_cast<float>(pos) * inv_freq;
+            const float cv = std::cos(angle);
+            const float sv = std::sin(angle);
+            cos.data[pos * hd + i] = cv;
+            cos.data[pos * hd + i + half] = cv;
+            sin.data[pos * hd + i] = sv;
+            sin.data[pos * hd + i + half] = sv;
+        }
+    }
+}
+
 // Causal scaled-dot-product attention, one query head at a time. GQA: query head hq
 // reads kv head hq / q_per_kv (HF repeat_kv expands kv heads in contiguous blocks).
 // Softmax in FP32 with max subtraction. q/ctx are [seq, n_heads*head_dim], k/v are
@@ -304,7 +328,6 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
     const int64_t KV = c.kv_dim();
     const int64_t I = c.intermediate_size;
     const int hd = c.head_dim;
-    const int half = hd / 2;
 
     // 1. Embed: gather rows of the embedding table.
     const Tensor& embed = weights.get("model.embed_tokens.weight");
@@ -316,24 +339,10 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
         for (int64_t j = 0; j < H; ++j) h.data[i * H + j] = src[j];
     }
 
-    // Precompute the RoPE tables once for all layers: inv_freq[i] = 1/theta^(2i/hd) for
-    // i in [0, hd/2); cos/sin rows are the hd/2 angles concatenated with themselves
-    // (the half-split layout rope() expects).
-    Tensor rope_cos = Tensor::zeros({seq, hd});
-    Tensor rope_sin = Tensor::zeros({seq, hd});
-    for (int64_t pos = 0; pos < seq; ++pos) {
-        for (int i = 0; i < half; ++i) {
-            const float inv_freq =
-                1.0f / std::pow(c.rope_theta, static_cast<float>(2 * i) / static_cast<float>(hd));
-            const float angle = static_cast<float>(pos) * inv_freq;
-            const float cv = std::cos(angle);
-            const float sv = std::sin(angle);
-            rope_cos.data[pos * hd + i] = cv;
-            rope_cos.data[pos * hd + i + half] = cv;
-            rope_sin.data[pos * hd + i] = sv;
-            rope_sin.data[pos * hd + i + half] = sv;
-        }
-    }
+    // Precompute the RoPE tables once for all layers (the half-split layout rope() expects).
+    Tensor rope_cos;
+    Tensor rope_sin;
+    rope_tables(seq, c, rope_cos, rope_sin);
 
     // Scratch buffers reused across the 22 layers (allocations stay explicit and bounded).
     Tensor x = Tensor::zeros({seq, H});      // RMSNorm output
