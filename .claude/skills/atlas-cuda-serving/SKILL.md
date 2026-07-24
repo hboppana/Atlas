@@ -33,13 +33,14 @@ no-math round-trip. What exists in `engine/cuda/`:
 
 ## CUDA kernels (engine/cuda/) — tuned for NVIDIA A6000
 
-Steps 2–6 LANDED and validated on the A6000 — every op in TinyLlama's forward pass has a
-proven GPU counterpart, and Step 6 composed them into the full on-device forward pass
-(`forward.cu`, measured 2.04e-4 max-abs vs `reference/logits.npy`, CTest 6/6). The
-remaining work is split into two steps so the failure domains stay apart: **Step 7** —
-greedy decode loop in C++/CUDA (`GpuModel::generate()`, spec'd in docs/13, no KV cache, no
-sampling); **Step 8** — pybind11 bridge + FastAPI streaming `/generate`, which closes
-Phase 2.
+Steps 2–7 LANDED and validated on the A6000 — every op in TinyLlama's forward pass has a
+proven GPU counterpart, Step 6 composed them into the full on-device forward pass
+(`forward.cu`, measured 2.04e-4 max-abs vs `reference/logits.npy`), and Step 7 put the
+greedy decode loop on top (`GpuModel::generate()` + `Model::generate()`/`argmax_last_row()`,
+token-exact against the CPU oracle, docs/13). CTest 7/7 in `build-cuda/`, 10/10 CPU. The
+remaining work is **Step 8** — pybind11 bridge + FastAPI streaming `/generate`, which
+closes Phase 2. No KV cache and no sampling yet: both are named perf/feature follow-ups
+(the KV cache is the headline Phase 2 perf item, held to Step 7's token-exact oracle).
 
 | File | Kernel | Approach |
 |------|--------|----------|
@@ -48,7 +49,7 @@ Phase 2.
 | `kernels.cu` | utility kernels (docs/10) | embed gather, residual add, SwiGLU, RoPE |
 | `attention.cu` | fused causal GQA attention (docs/11) | Q·Kᵀ → softmax → ·V in one launch, block per (query, head), score row in dynamic smem (seq ≤ 12288); flash-style rewrite is the named perf follow-up |
 | `reduce.cuh` | — | shared `block_reduce_sum`/`block_reduce_max`, templated on block size (rmsnorm 256, attention 128) |
-| `forward.cu` | `GpuModel`, full forward pass (docs/12) | 4.4 GB blob uploaded once at `create()`, weights are zero-copy `DeviceTensor::view`s at their host offsets; launch order held to `Model::forward()`. FP32 only (`qweights` ignored); per-launch syncs + per-call scratch kept deliberately — both are named perf follow-ups. Also home to Step 7's `generate()` greedy decode loop (docs/13) |
+| `forward.cu` | `GpuModel`, full forward pass + `generate()` (docs/12, docs/13) | 4.4 GB blob uploaded once at `create()`, weights are zero-copy `DeviceTensor::view`s at their host offsets; launch order held to `Model::forward()`. FP32 only (`qweights` ignored); per-launch syncs + per-call scratch kept deliberately — both are named perf follow-ups. Also home to Step 7's `generate()` greedy decode loop (docs/13): forward→argmax-last-row→append→repeat, no KV cache, EOS-terminated, `on_token` streaming hook |
 
 Each kernel is validated in `tests/test_*.cu` against its CPU oracle with a
 measured-then-pinned max-abs tolerance (attention: measured 8.94e-08 worst, pinned 1e-6).

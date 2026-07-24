@@ -1,5 +1,7 @@
 #include "forward.h"
 
+#include "../include/tokenizer.h"
+
 #include <cassert>
 #include <cstddef>
 #include <string>
@@ -159,6 +161,26 @@ Tensor GpuModel::forward(const std::vector<int>& token_ids) const {
 
     CUDA_CHECK(cudaFree(ids_d));
     return logits;
+}
+
+// Greedy decode loop on top of forward() — the GPU twin of Model::generate(), identical
+// contract and structure (docs/13-cuda-generate.md). No KV cache: each step re-runs the
+// full forward over the grown sequence, so per-token cost grows with length. Greedy
+// argmax makes token-for-token equality against the CPU loop a legitimate bar.
+std::vector<int> GpuModel::generate(const std::vector<int>& prompt_ids, int max_new_tokens,
+                                    const std::function<bool(int)>& on_token) const {
+    std::vector<int> ids = prompt_ids;
+    std::vector<int> out;
+    out.reserve(max_new_tokens > 0 ? max_new_tokens : 0);
+    for (int step = 0; step < max_new_tokens; ++step) {
+        const Tensor logits = forward(ids);
+        const int next = argmax_last_row(logits);
+        if (next == Tokenizer::kEosId) break;  // EOS is not emitted
+        out.push_back(next);
+        ids.push_back(next);
+        if (on_token && !on_token(next)) break;
+    }
+    return out;
 }
 
 }  // namespace atlas

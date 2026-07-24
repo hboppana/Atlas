@@ -1,5 +1,7 @@
 #include "../include/model.h"
 
+#include "../include/tokenizer.h"
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -398,6 +400,42 @@ Tensor Model::forward(const std::vector<int>& token_ids) const {
     Tensor logits = Tensor::zeros({seq, c.vocab_size});
     proj(x, "lm_head.weight", logits);
     return logits;
+}
+
+// Greedy next-token pick from a [seq, vocab] logits tensor: the argmax of the LAST row,
+// ties resolving to the lowest index (first-wins scan). The tie-break is stated, not
+// incidental, because GPU/CPU decode equality depends on both engines breaking ties the
+// same way (docs/13-cuda-generate.md).
+int argmax_last_row(const Tensor& logits) {
+    assert(logits.shape.size() == 2);
+    const int64_t seq = logits.shape[0];
+    const int64_t vocab = logits.shape[1];
+    const float* last = logits.data + (seq - 1) * vocab;
+    int best = 0;
+    for (int64_t j = 1; j < vocab; ++j) {
+        if (last[j] > last[best]) best = static_cast<int>(j);
+    }
+    return best;
+}
+
+// CPU greedy decode loop — the token-exact oracle GpuModel::generate() is validated
+// against. Structurally identical to the GPU version by design (docs/13); the equality
+// assertion covers the duplication better than a shared templated helper would, and it
+// keeps the CPU tree free of any CUDA-header coupling.
+std::vector<int> Model::generate(const std::vector<int>& prompt_ids, int max_new_tokens,
+                                 const std::function<bool(int)>& on_token) const {
+    std::vector<int> ids = prompt_ids;
+    std::vector<int> out;
+    out.reserve(max_new_tokens > 0 ? max_new_tokens : 0);
+    for (int step = 0; step < max_new_tokens; ++step) {
+        const Tensor logits = forward(ids);
+        const int next = argmax_last_row(logits);
+        if (next == Tokenizer::kEosId) break;  // EOS is not emitted
+        out.push_back(next);
+        ids.push_back(next);
+        if (on_token && !on_token(next)) break;
+    }
+    return out;
 }
 
 }  // namespace atlas

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include "../include/model.h"
@@ -44,6 +45,24 @@ struct GpuModel {
     // contract, op order, and launch order as Model::forward(); all launches go on the
     // default stream in program order, so cross-kernel ordering needs no explicit events.
     Tensor forward(const std::vector<int>& token_ids) const;
+
+    // Greedy decode on top of forward(): argmax the last logit row, append, repeat.
+    //
+    // Stops at max_new_tokens, or when the model produces EOS (Tokenizer::kEosId) — the
+    // EOS id is NOT included in the result. Returns the generated ids only, without the
+    // prompt.
+    //
+    // on_token, when set, is called with each id the moment it is produced and returns
+    // false to stop early. This is the hook Step 8's FastAPI endpoint streams from; it is
+    // declared now so that adding streaming later needs no signature change. It is called
+    // before the next forward begins, so a caller that abandons the request stops paying
+    // for it immediately.
+    //
+    // No KV cache (docs/13): every step re-runs the full-prompt forward over the grown
+    // sequence, so per-token cost grows with length. Correctness first.
+    std::vector<int> generate(const std::vector<int>& prompt_ids,
+                              int max_new_tokens,
+                              const std::function<bool(int)>& on_token = {}) const;
 
 private:
     // Non-owning; supplies config, shapes and offsets on every call.

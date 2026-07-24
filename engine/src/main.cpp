@@ -9,6 +9,7 @@
 // docs/05-quantization.md).
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -26,12 +27,16 @@ int main(int argc, char** argv) {
     const std::string ref = ATLAS_REFERENCE_DIR;
     const std::string wdir = ATLAS_WEIGHTS_DIR;
     bool int8 = false;
+    int max_new_tokens = 1;  // default 1: preserves the single-token prediction verbatim
     std::string prompt = "The capital of France is";
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--int8") {
+        const std::string arg = argv[i];
+        if (arg == "--int8") {
             int8 = true;
+        } else if (arg == "-n" && i + 1 < argc) {
+            max_new_tokens = std::atoi(argv[++i]);
         } else {
-            prompt = argv[i];
+            prompt = arg;
         }
     }
 
@@ -58,21 +63,20 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < ids.size(); ++i) std::printf("%s%d", i ? ", " : "", ids[i]);
     std::printf("]\n");
 
-    std::printf("[4/4] forward pass (%zu tokens, 22 layers, %s, single-threaded)\n",
-                ids.size(), int8 ? "INT8 weights / FP32 activations" : "FP32");
-    const atlas::Tensor logits = model.forward(ids);
+    std::printf("[4/4] greedy decode (%d new token(s), %zu-token prompt, 22 layers, %s,"
+                " single-threaded)\n",
+                max_new_tokens, ids.size(),
+                int8 ? "INT8 weights / FP32 activations" : "FP32");
 
-    // Greedy decode: argmax of the last row is the model's next-token prediction.
-    const int64_t vocab = logits.shape[1];
-    const float* last = logits.data + (logits.shape[0] - 1) * vocab;
-    int best = 0;
-    for (int64_t j = 1; j < vocab; ++j) {
-        if (last[j] > last[best]) best = static_cast<int>(j);
-    }
+    // Greedy decode loop (Model::generate): each step re-runs the full forward over the
+    // grown sequence and argmaxes the last row. No KV cache — CPU-only and slow at ~7 s
+    // per token, but it makes a real completion demonstrable (docs/13-cuda-generate.md).
+    const std::vector<int> gen = model.generate(ids, max_new_tokens);
 
-    std::printf("\nnext token: id=%d  text=\"%s\"  logit=%.4f\n", best,
-                tok.decode({best}).c_str(), last[best]);
-    // decode() strips the word-initial "▁"-space, so re-insert one for display.
-    std::printf("completion: \"%s %s\"\n", prompt.c_str(), tok.decode({best}).c_str());
+    std::printf("\ngenerated ids = [");
+    for (size_t i = 0; i < gen.size(); ++i) std::printf("%s%d", i ? ", " : "", gen[i]);
+    std::printf("]\n");
+    // decode() strips the word-initial "▁"-space; prepend one so the join reads naturally.
+    std::printf("completion: \"%s %s\"\n", prompt.c_str(), tok.decode(gen).c_str());
     return 0;
 }

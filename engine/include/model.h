@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -69,6 +70,11 @@ void attention(const Tensor& q, const Tensor& k, const Tensor& v,
 
 // SwiGLU gating, in place in gate: gate = SiLU(gate) * up, SiLU(z) = z * sigmoid(z).
 void swiglu(Tensor& gate, const Tensor& up);
+
+// Greedy next-token pick: index of the maximum logit in the LAST row of a [seq, vocab]
+// logits tensor. Ties resolve to the lowest index (first-wins scan), which must match on
+// both engines for GPU/CPU decode comparisons to be exact (docs/13-cuda-generate.md).
+int argmax_last_row(const Tensor& logits);
 
 // Precompute the RoPE cos/sin tables for seq positions: [seq, head_dim] each, the
 // head_dim/2 angles concatenated with themselves (the half-split layout rope() expects).
@@ -152,6 +158,22 @@ struct Model {
     // Prefill only: no KV cache, no incremental decode (those arrive after the math is
     // proven). Greedy-decoding argmax of the last row gives the next-token prediction.
     Tensor forward(const std::vector<int>& token_ids) const;
+
+    // Greedy decode loop — the CPU twin of GpuModel::generate(), identical contract and
+    // identical structure (docs/13-cuda-generate.md). It is the oracle test_generate_gpu
+    // compares against, and what the CLI uses in the CPU-only build.
+    //
+    // Each step re-runs the FULL forward over the grown sequence (no KV cache), argmaxes
+    // the last row, appends, repeats. Stops at max_new_tokens, or when the model produces
+    // EOS (Tokenizer::kEosId) — the EOS id is NOT included in the result. Returns the
+    // generated ids only, without the prompt.
+    //
+    // on_token, when set, is called with each id the moment it is produced and returns
+    // false to stop early; it is called before the next forward begins, so a caller that
+    // abandons the request stops paying for it immediately.
+    std::vector<int> generate(const std::vector<int>& prompt_ids,
+                              int max_new_tokens,
+                              const std::function<bool(int)>& on_token = {}) const;
 };
 
 }  // namespace atlas

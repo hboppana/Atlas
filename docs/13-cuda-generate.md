@@ -1,6 +1,6 @@
 # Phase 2 · Step 7 — greedy decode loop (`GpuModel::generate()`, validated against the CPU loop)
 
-> Status: **spec** — not yet implemented.
+> Status: **done** — validated on-device (Suramar, A6000 sm_86, 2026-07-24); CTest 7/7.
 > Predecessor: Step 6 — full GPU forward pass — **done** ([12-cuda-forward.md](12-cuda-forward.md))
 > Successor: Step 8 — pybind11 bridge + FastAPI streaming `/generate`, which closes Phase 2.
 
@@ -167,6 +167,17 @@ No new numerics are introduced, so there is nothing to measure-then-pin in this 
 only new failure modes are logic (off-by-one, EOS handling, callback semantics) and they
 are all binary. Record the observed completion text and the per-step margins here on the
 first green run for future reference.
+
+**First green run (Suramar, A6000 sm_86, card 1, 2026-07-24).** GPU and CPU produced the
+identical 8-id sequence `{3681, 29889, 13, 13, 29906, 29889, 350, 29889}` from
+"The capital of France is"; first token `3681` ("Paris") as anchored. Decoded completion:
+`"The capital of France isParis.\n\n2. B."` (the `.\n\n2. B` continuation is TinyLlama-1.1B
+base behaviour, not a contract — asserted only non-empty). Per-step tie-break margins
+`{1.12, 0.38, 0.47, 1.67, 0.56, 4.09, 0.20, 0.97}` — all in the 1e-1..1e+1 range, four-plus
+orders of magnitude above the 8e-5 GPU-vs-CPU drift, so exact argmax equality is safe.
+Per-step GPU time was flat at ~0.054 s (seq 6→14 is too short for the O(n²) growth to bite
+visibly yet); GPU 0.43 s vs CPU 89.9 s for the 8 tokens (~0.054 vs ~11.2 s/token) — the CPU
+oracle dominates the ~97 s test wall time, which is why the equality check stays at 8 tokens.
 
 ## Build & test workflow (unchanged loop)
 

@@ -57,3 +57,12 @@ target_compile_definitions(test_forward_gpu PRIVATE
     ATLAS_REFERENCE_DIR="${CMAKE_SOURCE_DIR}/reference"
     ATLAS_WEIGHTS_DIR="${CMAKE_SOURCE_DIR}/weights/tinyllama-1.1b-chat")
 add_test(NAME test_forward_gpu COMMAND test_forward_gpu)
+
+# Step 7 greedy decode loop vs the CPU Model::generate() oracle — same on-disk artifacts
+# and the same path defines / SKIP-green-without-blob discipline as test_forward_gpu.
+add_executable(test_generate_gpu tests/test_generate_gpu.cu)
+target_link_libraries(test_generate_gpu PRIVATE atlas_cuda)
+target_compile_definitions(test_generate_gpu PRIVATE
+    ATLAS_REFERENCE_DIR="${CMAKE_SOURCE_DIR}/reference"
+    ATLAS_WEIGHTS_DIR="${CMAKE_SOURCE_DIR}/weights/tinyllama-1.1b-chat")
+add_test(NAME test_generate_gpu COMMAND test_generate_gpu)
