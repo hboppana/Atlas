@@ -53,5 +53,22 @@ This writes the test oracles (`config.json`, `token_ids.npy`, `logits.npy`) to
 
 ## Status
 
-Early scaffolding. See `atlas-repo-structure.jsx` for the full planned repository layout
-and phased build plan.
+**Phases 1 and 2 are complete.** The C++ engine matches the HuggingFace reference logits,
+the CUDA kernels reproduce it on an A6000, and the FastAPI server streams completions:
+
+```bash
+scripts/build_cuda.sh && scripts/run_server.sh
+curl -N -X POST localhost:8000/generate -H 'content-type: application/json' \
+     -d '{"prompt": "The capital of France is", "max_new_tokens": 8}'
+```
+
+| Phase | State | Evidence |
+|-------|-------|----------|
+| 1 — C++ engine (CPU) | done | 10/10 CTest; logits match `reference/logits.npy` |
+| 2 — CUDA + serving | done | 7/7 CUDA CTest; `pytest server/tests` 27 passed; 49 ms/token, TTFT 105 ms |
+| 3 — RAG | next | — |
+| 4 — LangGraph agent | planned | — |
+| 5 — MCP server | planned | — |
+
+No KV cache and greedy decoding only — both are named follow-ups, not oversights
+(`docs/14-bridge-serving.md`). Per-step design docs live in `docs/`.

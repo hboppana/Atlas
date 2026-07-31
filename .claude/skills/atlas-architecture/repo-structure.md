@@ -42,6 +42,8 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 │   │   ├── attention.cu        Fused attention kernel — Q·K^T softmax V in one launch
 │   │   ├── layernorm.cu        Fused layer norm — single-pass mean+variance, warp-level reduction
 │   │   └── kernels.cu          Utility kernels — GELU, residual add, embedding lookup
+│   ├── bindings/               [Phase 2 Step 8] pybind11 module `_atlas_engine`
+│   │   └── atlas_engine.cpp    Binds Tokenizer, Model, GpuModel (CUDA builds only) -> build*/python/
 │   └── tests/                  Correctness tests against HuggingFace reference
 │       ├── test_tokenizer.cpp  BPE encode/decode round-trip, edge cases (empty, unicode)
 │       ├── test_forward.cpp    Compare output logits vs HuggingFace within tolerance
@@ -49,9 +51,10 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 │
 ├── server/                     [Phase 2] Python bridge + FastAPI serving layer
 │   ├── __init__.py
-│   ├── bridge.py               pybind11 bridge — exposes C++ engine.generate() to Python
-│   ├── serve.py                FastAPI server — /generate endpoint, streaming token output
-│   └── config.py               Model path, max tokens, temperature, device selection
+│   ├── bridge.py               Façade over _atlas_engine — Engine.load() once, generate()/stream()
+│   ├── serve.py                FastAPI server — POST /generate (SSE streaming), GET /health
+│   ├── config.py               Paths, device (auto|cuda|cpu), max_new_tokens cap, host/port
+│   └── tests/                  test_bridge.py (no FastAPI import — the layer boundary), test_serve.py
 │
 ├── rag/                        [Phase 3] RAG pipeline — document ingestion to retrieval
 │   ├── __init__.py
@@ -79,7 +82,8 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 │   ├── validate.py             Compare Atlas output vs HuggingFace for correctness verification
 │   ├── benchmark.py            Measure tokens/sec, latency, memory usage across all phases
 │   ├── build_cuda.sh           Configure + compile CUDA into build-cuda/ on the lab A6000 box
-│   ├── test_cuda.sh            Run the CUDA bring-up test (ctest -R test_device) on the A6000 box
+│   ├── test_cuda.sh            Run the CUDA test suite (ctest, 7 tests) on the A6000 box
+│   ├── run_server.sh           Launch the FastAPI inference server (uvicorn) — Phase 2 Step 8
 │   └── ingest_papers.py        Bulk ingest arXiv PDFs on federated learning / differential privacy
 │
 ├── data/                       Paper corpus and processed chunks (gitignored except structure)

@@ -1,6 +1,8 @@
 # Phase 2 · Step 8 — pybind11 bridge + FastAPI streaming `/generate`
 
-> Status: **spec** — not yet implemented.
+> Status: **done** — validated on-device (Suramar, A6000 sm_86, card 1, 2026-07-31);
+> `pytest server/tests` 27 passed (26 + 1 skip on the CPU module), CTest 7/7 CUDA + 10/10 CPU.
+> **Phase 2 is complete.**
 > Predecessor: Step 7 — greedy decode loop — **done** ([13-cuda-generate.md](13-cuda-generate.md))
 > Successor: **Phase 3** — the RAG pipeline (`rag/`), which is the first consumer of this
 > surface. Step 8 closes Phase 2.
@@ -353,11 +355,32 @@ module or the gitignored weight blob is absent, matching `test_forward_gpu` /
 ### Expected result
 
 Nothing to pin. Record on the first green run: which module path loaded, the reported
-device, the streamed text, and **time-to-first-token vs. total** for an 8-token completion
-— on the A6000 that should be roughly 0.054 s and 0.43 s respectively (docs/13). TTFT
-being ≈ one token's time is the observable proof that the endpoint streams rather than
-buffers, and the gap between it and total is the argument for the KV cache stated in the
-units a server cares about.
+device, the streamed text, and **time-to-first-token vs. total** — TTFT being ≈ one token's
+time is the observable proof that the endpoint streams rather than buffers, and the gap
+between it and total is the argument for the KV cache stated in the units a server cares
+about.
+
+**First green run (Suramar, A6000 sm_86, card 1, 2026-07-31).** Module
+`build-cuda/python/_atlas_engine.cpython-310-x86_64-linux-gnu.so`, `device=cuda`,
+`has_cuda=true`. `pytest server/tests` — **27 passed in 4.8 s** (19 bridge + 8 serve). The
+bridge reproduced docs/13 exactly: ids `[3681, 29889, 13, 13, 29906, 29889, 350, 29889]`,
+text `"Paris.\n\n2. B."`, streamed concatenation equal to the batch text.
+
+Against a live `uvicorn` (`curl -N`), a 12-token request streamed with events arriving
+**33–35 ms apart** — visibly incremental, not buffered. Measured over 32 tokens:
+**TTFT 105 ms vs 1.575 s total** (49 ms/token), a 15x gap. Abandoning a 64-token request
+after 3 tokens returned in **0.09 s** against a ~3.2 s full run, the server logged
+`finish_reason=disconnect`, and the next request was served **0.20 s** later — the docs/13
+`on_token` early-stop working end-to-end and the generation slot freed cleanly.
+
+**Same suites against the CPU module** (`ATLAS_ENGINE_MODULE=build/python/...so`):
+**26 passed, 1 skipped in 9m56s** — the skip is `test_gpu_model_keeps_its_model_alive`,
+which has no `GpuModel` to test in a CPU-only module. Identical ids and identical text from
+a completely different engine, ~600x slower. That is the both-trees claim holding.
+
+The per-token cost climbing from docs/13's 0.054 s (seq 6→14) to 0.049 s here at seq 6→38
+is not an improvement in the kernel; it is the same flat-ish regime, and the O(n²) growth
+still bites at longer sequences. The KV cache remains the fix.
 
 ## Build & test workflow
 
@@ -382,6 +405,45 @@ curl -N -X POST localhost:8000/generate -d '{"prompt":"The capital of France is"
 - `.gitignore` gains `*.so` (build artifacts already land under the ignored `build*/`, but
   the extension is the first thing a stray `pip`/manual build could drop elsewhere).
 
+## What the implementation changed from this spec
+
+Recorded so the next reader is not surprised by the diff between the plan and the tree.
+
+- **`CUDA_SEPARABLE_COMPILATION` on `atlas_cuda` was turned OFF** (it had been ON since
+  Step 1). With it on, nvcc emits relocatable device code and the required device-link step
+  produces an object referencing `fatbinData` / `__cudaRegisterLinkedBinary_*` — symbols
+  that cannot be resolved when those objects are pulled into a **shared** module, so
+  `import _atlas_engine` failed with `undefined symbol: fatbinData`. Nothing in
+  `engine/cuda/` needs relocatable device code: every kernel is self-contained in its `.cu`
+  and `reduce.cuh`'s `block_reduce_sum`/`block_reduce_max` are function *templates*
+  instantiated per translation unit. The flag was speculative. CTest **7/7** after the
+  change confirms the kernels are unaffected. Note this requires a clean `build-cuda/` —
+  stale `-dc` objects survive the property change and fail at link.
+- **`atlas_engine` gains `POSITION_INDEPENDENT_CODE`** when `ATLAS_BUILD_PYTHON=ON` (a
+  static archive can only be linked into a shared object if its objects are PIC).
+  `atlas_cuda` already set it.
+- **`Model.load` is bound through a lambda**, not directly: its third parameter is the
+  pinned `Config`, defaulted in C++ but invisible to pybind11 (which static-asserts on the
+  arity mismatch). `Config` stays unexposed — `reference/config.json` is the single source
+  of truth for hyperparameters.
+- **`Engine.runner`** is exposed as a read-only property so `test_bridge.py` can exercise
+  the raw `generate()`/`on_token` contract (early stop, `None` return, callback exception)
+  directly rather than only through `stream()`.
+- **`Done.finish_reason` is `"eos" | "length"` only.** A disconnect closes the iterator, so
+  there is nobody left to hand a terminal event to; `serve.py` logs that case instead. The
+  spec listed `"disconnect"` as a third value, which was never reachable.
+- **`TokenEvent.index` is the token's position in the generated sequence**, so it always
+  matches `id`. It is monotonically increasing but may skip: when a token completes a
+  multi-byte UTF-8 character a previous token began, the held-back text is merged into the
+  later event. The spec said "contiguous"; monotonic is the honest contract.
+- **The `lifespan` handler reuses an engine already on `app.state`** instead of loading
+  unconditionally. Without it the endpoint tests paid a second 4.4 GB upload.
+- **Environment.** The standing convention is conda, but conda on Suramar is a relocated
+  install with a dead interpreter shebang (`conda` itself does not run) and its only env is
+  `fairdp`. The repo's `.venv` (Python **3.10**, derived from that env) is what the Phase 2
+  deps were installed into and what the module's ABI targets. `scripts/build_cuda.sh` and
+  `scripts/run_server.sh` both prefer `.venv/bin/python` and accept `PYTHON=` to override.
+
 ## Performance follow-ups (named, deferred)
 
 Inherited from docs/12–13, plus this step's own:
@@ -405,10 +467,13 @@ Inherited from docs/12–13, plus this step's own:
 | `engine/bindings/atlas_engine.cpp` | new — the pybind11 module |
 | `engine/bindings/CMakeLists.txt` | new — `pybind11_add_module(_atlas_engine ...)` |
 | `CMakeLists.txt` | `option(ATLAS_BUILD_PYTHON)` + guarded `add_subdirectory` |
+| `engine/CMakeLists.txt` | `POSITION_INDEPENDENT_CODE` on `atlas_engine` when building the module |
+| `engine/cuda/CMakeLists.txt` | `CUDA_SEPARABLE_COMPILATION` ON → OFF (see above) |
 | `server/__init__.py` | new — package marker |
 | `server/config.py` | new — paths, device, caps, host/port |
 | `server/bridge.py` | new — module discovery + `Engine` (`generate`/`stream`) |
 | `server/serve.py` | new — FastAPI app, `POST /generate` (SSE), `GET /health` |
+| `server/tests/__init__.py`, `conftest.py` | new — fixtures, oracle constants, SKIP-green gates |
 | `server/tests/test_bridge.py` | new — bridge vs the C++ oracle, no FastAPI import |
 | `server/tests/test_serve.py` | new — endpoint + streaming behaviour |
 | `scripts/build_cuda.sh` | add `-DATLAS_BUILD_PYTHON=ON` |

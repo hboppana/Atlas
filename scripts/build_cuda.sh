@@ -33,8 +33,22 @@ echo "build_cuda: using cmake $("$CMAKE" --version | head -1 | grep -oE '[0-9.]+
 # Out-of-source build dir dedicated to the CUDA configuration, kept separate from any CPU
 # build tree. Release: the kernels are the point; debug asserts aren't needed to compile.
 # CUDAToolkit_ROOT/CMAKE_CUDA_COMPILER make CMake's CUDA detection independent of PATH.
+# The Step 8 pybind11 module builds alongside the kernels into build-cuda/python/, and is
+# what server/bridge.py discovers first (docs/14-bridge-serving.md). It needs an interpreter
+# with pybind11 installed; PYTHON=/path/to/python overrides the project .venv.
+PYTHON="${PYTHON:-$([ -x .venv/bin/python ] && echo "$PWD/.venv/bin/python" || command -v python3)}"
+if "$PYTHON" -c "import pybind11" 2>/dev/null; then
+    ATLAS_PYTHON_ARGS=(-DATLAS_BUILD_PYTHON=ON -DPython3_EXECUTABLE="$PYTHON")
+    echo "build_cuda: building the pybind11 module for $PYTHON"
+else
+    ATLAS_PYTHON_ARGS=(-DATLAS_BUILD_PYTHON=OFF)
+    echo "build_cuda: pybind11 not installed for $PYTHON -- skipping the Python module" >&2
+    echo "build_cuda: pip install -r requirements.txt to enable it" >&2
+fi
+
 "$CMAKE" -B build-cuda -S . \
     -DATLAS_USE_CUDA=ON \
+    "${ATLAS_PYTHON_ARGS[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCUDAToolkit_ROOT="$CUDA_HOME" \
     -DCMAKE_CUDA_COMPILER="$CUDA_HOME/bin/nvcc"

@@ -14,8 +14,15 @@ add_library(atlas_cuda STATIC
 # Links atlas_engine so CUDA code can use the host Tensor (and, from Step 2, linear() as
 # the validation oracle). Headers are reached via relative include paths from the .cu files.
 target_link_libraries(atlas_cuda PUBLIC atlas_engine)
+# CUDA_SEPARABLE_COMPILATION is deliberately OFF (it was ON through Step 7, speculatively).
+# Nothing here needs relocatable device code: every kernel is self-contained in its .cu, and
+# reduce.cuh's block_reduce_sum/max are function TEMPLATES instantiated per translation unit.
+# Leaving it ON forced a device-link step whose output references `fatbinData`, which cannot
+# be resolved when the objects are pulled into a shared module -- i.e. it broke the Step 8
+# pybind11 module (docs/14-bridge-serving.md) with an undefined symbol at import. Whole-
+# program compilation also lets nvcc inline across the kernel boundary.
 set_target_properties(atlas_cuda PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_SEPARABLE_COMPILATION OFF
     POSITION_INDEPENDENT_CODE ON)
 
 # --- test (blob-free; round-trip + diff harness + CUDA_CHECK death case) ---

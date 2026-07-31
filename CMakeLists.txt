@@ -16,6 +16,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ATLAS_USE_CUDA "Build CUDA kernels (Phase 2)" OFF)
+option(ATLAS_BUILD_PYTHON "Build the pybind11 extension module (Phase 2)" OFF)
 
 # Phase 2 CUDA path, guarded OFF so the CPU build needs no nvcc. Turned ON to build and
 # validate CUDA directly on the lab A6000 box (sm_86) via scripts/build_cuda.sh. When ON:
@@ -34,4 +35,13 @@ add_subdirectory(engine)
 
 if (ATLAS_USE_CUDA)
     add_subdirectory(engine/cuda)
+endif()
+
+# Phase 2 Step 8 pybind11 module, guarded OFF by the same discipline as ATLAS_USE_CUDA so
+# the Phase 1 build needs no Python dev headers. When ON it builds in BOTH configurations:
+# with ATLAS_USE_CUDA=OFF the module exposes Tokenizer + Model (has_cuda == False), with it
+# ON the module also exposes GpuModel (has_cuda == True). Which .so is on the path is what
+# selects the device — see docs/14-bridge-serving.md.
+if (ATLAS_BUILD_PYTHON)
+    add_subdirectory(engine/bindings)
 endif()

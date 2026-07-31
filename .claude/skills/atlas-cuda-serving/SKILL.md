@@ -33,14 +33,21 @@ no-math round-trip. What exists in `engine/cuda/`:
 
 ## CUDA kernels (engine/cuda/) — tuned for NVIDIA A6000
 
-Steps 2–7 LANDED and validated on the A6000 — every op in TinyLlama's forward pass has a
+Steps 2–8 LANDED and validated on the A6000 — every op in TinyLlama's forward pass has a
 proven GPU counterpart, Step 6 composed them into the full on-device forward pass
-(`forward.cu`, measured 2.04e-4 max-abs vs `reference/logits.npy`), and Step 7 put the
+(`forward.cu`, measured 2.04e-4 max-abs vs `reference/logits.npy`), Step 7 put the
 greedy decode loop on top (`GpuModel::generate()` + `Model::generate()`/`argmax_last_row()`,
-token-exact against the CPU oracle, docs/13). CTest 7/7 in `build-cuda/`, 10/10 CPU. The
-remaining work is **Step 8** — pybind11 bridge + FastAPI streaming `/generate`, which
-closes Phase 2. No KV cache and no sampling yet: both are named perf/feature follow-ups
-(the KV cache is the headline Phase 2 perf item, held to Step 7's token-exact oracle).
+token-exact against the CPU oracle, docs/13), and Step 8 exposed it over pybind11 + FastAPI
+(docs/14). **Phase 2 is complete**; CTest 7/7 in `build-cuda/`, 10/10 CPU, `pytest
+server/tests` 27 passed. No KV cache and no sampling yet: both are named perf/feature
+follow-ups (the KV cache is the headline Phase 2 perf item, held to Step 7's token-exact
+oracle).
+
+`atlas_cuda` builds with **`CUDA_SEPARABLE_COMPILATION OFF`** (flipped in Step 8): nothing
+needs relocatable device code — `reduce.cuh`'s reductions are function templates — and
+leaving it ON emits a device-link object referencing `fatbinData`, which cannot resolve
+inside a shared module and broke `import _atlas_engine`. Changing that property requires a
+clean `build-cuda/`; stale `-dc` objects survive it and fail at link.
 
 | File | Kernel | Approach |
 |------|--------|----------|
@@ -59,19 +66,31 @@ measured-then-pinned max-abs tolerance (attention: measured 8.94e-08 worst, pinn
 - The CUDA path is **guarded behind a CMake flag** that was off in Phase 1; turn it on here.
 - Keep the architecture honest to TinyLlama: RMSNorm (not LayerNorm), RoPE, SwiGLU, GQA.
 
-## Serving layer (server/)
+## Serving layer (Step 8, LANDED — docs/14)
 
 | File | Responsibility |
 |------|----------------|
-| `bridge.py` | pybind11 bridge — exposes the C++ `engine.generate()` to Python |
-| `serve.py` | FastAPI server — `/generate` endpoint with **streaming** token output |
-| `config.py` | model path, max tokens, temperature, device selection |
-| `__init__.py` | package marker |
+| `engine/bindings/atlas_engine.cpp` | the pybind11 module `_atlas_engine`. Binds `Tokenizer`, `Model`, and `GpuModel` (the last only when built with `ATLAS_USE_CUDA=ON`), plus `has_cuda`/`BOS_ID`/`EOS_ID`. `forward()` and `quantize_int8()` deliberately unbound |
+| `server/bridge.py` | the only Python file that knows the module exists. `Engine.load()` once; `generate()`/`stream()` |
+| `server/serve.py` | FastAPI — `POST /generate` (SSE), `GET /health`, engine loaded in `lifespan` |
+| `server/config.py` | paths, `device` (`auto\|cuda\|cpu`), `max_new_tokens` cap, host/port — all `ATLAS_*` env-overridable |
+| `server/tests/` | `test_bridge.py` (imports **no** FastAPI — the layer boundary) + `test_serve.py` |
 
-- The bridge is **pybind11** (already a planned dep). The Python side never reimplements
-  inference — it calls into the C++/CUDA engine.
-- `/generate` **streams** tokens as they are produced (don't buffer the whole completion).
-- Uncomment the Phase 2 deps in `requirements.txt`: `fastapi`, `uvicorn`, `pybind11`.
+- Built by `option(ATLAS_BUILD_PYTHON)` into `build*/python/`. **Which `.so` is imported is
+  the device selection**: `build/python/` has no `GpuModel`, `build-cuda/python/` does.
+  `bridge.py` prefers the CUDA tree; `ATLAS_ENGINE_MODULE` overrides.
+- Three binding hazards, all handled and regression-tested: **GIL** (release around
+  `generate()`, re-acquire per token; a `None` callback return means keep going),
+  **lifetime** (`keep_alive<0,1>` on `GpuModel.create` — it holds a non-owning `Model*`
+  into the mmap), **move-only** types (construct via the static factories only).
+- **Never decode token-by-token.** `Tokenizer::decode` strips the leading space and
+  reassembles `<0xNN>` byte runs — decode the growing prefix and emit the delta, holding
+  back anything that ends mid-UTF-8. `test_stream_equals_batch` is the guard.
+- One in-flight generation, serialized by a lock (one model, default stream, no batching).
+  Client disconnect trips Step 7's `on_token` early stop — measured: a 64-token request
+  abandoned after 3 tokens returns in 0.09 s vs ~3.2 s.
+- Env on the lab box: conda is broken there, so the Phase 2 deps live in the repo's `.venv`
+  (Python 3.10). `PYTHON=` overrides in both scripts.
 
 ## Build & test workflow (scripts/)
 
@@ -80,9 +99,15 @@ with 2x NVIDIA RTX A6000 (Ampere, sm_86) attached, no SLURM/scheduler. Runners:
 
 | Script | Job |
 |--------|-----|
-| `scripts/build_cuda.sh` | LANDED — configure `-DATLAS_USE_CUDA=ON` + compile into `build-cuda/` |
-| `scripts/test_cuda.sh` | LANDED — `nvidia-smi` + `ctest -R test_device` (widens as kernel tests join) |
+| `scripts/build_cuda.sh` | LANDED — configure `-DATLAS_USE_CUDA=ON` (+ `-DATLAS_BUILD_PYTHON=ON` when pybind11 is installed) + compile into `build-cuda/` |
+| `scripts/test_cuda.sh` | LANDED — `nvidia-smi` + `ctest` over the 7 CUDA tests |
+| `scripts/run_server.sh` | LANDED — `python -m server.serve` (uvicorn); honours `ATLAS_DEVICE`, `CUDA_VISIBLE_DEVICES`, `PYTHON` |
 | benchmark (later) | run the benchmark suite, log to `results/` |
+
+The Python suites are a **separate `pytest server/tests` invocation**, not part of
+`test_cuda.sh`: they need an interpreter with the deps installed and their failure modes are
+unrelated to the kernels'. Both they and the blob-gated CUDA tests SKIP green without the
+4.4 GB weight blob.
 
 Loop: edit `engine/cuda/` → `scripts/build_cuda.sh` → `scripts/test_cuda.sh` → iterate. The
 box is shared and both A6000s are usually busy, so pin a card with `CUDA_VISIBLE_DEVICES=1`

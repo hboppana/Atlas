@@ -25,3 +25,6 @@ __pycache__/
 
 # remove jsx
 atlas-repo-structure.jsx
+
+# pybind11 extension module (built into build*/python/)
+*.so

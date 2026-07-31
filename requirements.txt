@@ -8,10 +8,13 @@ huggingface_hub>=0.23
 safetensors>=0.4
 numpy>=1.26
 
-# --- Phase 2: serving (added later) ---
-# fastapi
-# uvicorn
-# pybind11
+# --- Phase 2: serving (server/, engine/bindings/ — docs/14-bridge-serving.md) ---
+fastapi>=0.110
+uvicorn>=0.29
+pybind11>=2.12
+# test deps for server/tests: httpx backs fastapi's TestClient
+pytest>=8.0
+httpx>=0.27
 
 # --- Phase 3: RAG (added later) ---
 # chromadb

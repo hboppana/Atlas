@@ -10,6 +10,13 @@ add_library(atlas_engine STATIC
 target_include_directories(atlas_engine PUBLIC include)
 target_compile_features(atlas_engine PUBLIC cxx_std_17)
 
+# A static archive can only be linked into a shared object (the pybind11 module, and
+# atlas_cuda which already sets this) if its objects are position-independent. Off by
+# default so the Phase 1 executables keep their non-PIC codegen.
+if (ATLAS_BUILD_PYTHON)
+    set_target_properties(atlas_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # --- tests (zero-dependency harness, registered with CTest) ---
 # One helper per target: tests/<name>.cpp -> exe + CTest registration. Every test gets
 # the reference/weights path defines (harmless where unused; the blob-gated tests SKIP
