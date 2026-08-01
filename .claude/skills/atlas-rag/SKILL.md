@@ -1,6 +1,6 @@
 ---
 name: atlas-rag
-description: Phase 3 — the RAG pipeline (rag/), from PDF ingestion to retrieval. Covers section-aware chunking, local sentence-transformer embeddings, the ChromaDB vector store, and MMR retrieval over a federated-learning / differential-privacy paper corpus. Use when writing or reviewing rag/ (ingest, embed, store, retrieve) or scripts/ingest_papers.py.
+description: Phase 3 — the RAG pipeline (rag/), from PDF ingestion to retrieval. Covers section-aware chunking, local sentence-transformer embeddings, the ChromaDB vector store, and MMR retrieval over a domain-general academic paper corpus. Use when writing or reviewing rag/ (ingest, embed, store, retrieve) or scripts/ingest_papers.py.
 ---
 
 # Atlas Phase 3 — RAG Pipeline
@@ -9,7 +9,12 @@ Turn a corpus of academic PDFs into retrievable evidence. **Prerequisite:** the 
 engine (Phases 1–2) works. Read `atlas-architecture` first. Everything is **local** — local
 embeddings, a local vector store — consistent with the from-scratch, no-hosted-API ethos.
 
-Corpus theme: **federated learning / differential privacy** papers (arXiv / Semantic Scholar).
+Corpus: academic PDFs from arXiv / Semantic Scholar, **no fixed theme**. The pipeline is
+domain-general and must never key off subject matter; papers carry a free-form `topic` tag
+in metadata so retrieval can be scoped without partitioning the store. One soft constraint
+applies to the *initial* corpus only: keep it **clustered around one or two areas**, because
+the retrieval eval set and MMR's diversity behaviour both need papers that overlap. It
+broadens freely once retrieval is validated.
 
 ## Pipeline (rag/)
 

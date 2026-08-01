@@ -84,7 +84,7 @@ atlas/                          Full-stack AI system: C++/CUDA inference → RAG
 │   ├── build_cuda.sh           Configure + compile CUDA into build-cuda/ on the lab A6000 box
 │   ├── test_cuda.sh            Run the CUDA test suite (ctest, 7 tests) on the A6000 box
 │   ├── run_server.sh           Launch the FastAPI inference server (uvicorn) — Phase 2 Step 8
-│   └── ingest_papers.py        Bulk ingest arXiv PDFs on federated learning / differential privacy
+│   └── ingest_papers.py        Bulk fetch + ingest arXiv PDFs (any topic; no fixed theme)
 │
 ├── data/                       Paper corpus and processed chunks (gitignored except structure)
 │   ├── papers/                 Raw PDFs from arXiv / Semantic Scholar

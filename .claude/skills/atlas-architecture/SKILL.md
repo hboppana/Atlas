@@ -60,8 +60,10 @@ When working inside a phase, read that phase's skill for the detailed specs and 
   (`Suramar`) with 2x NVIDIA RTX A6000 (Ampere, sm_86) attached, no SLURM/scheduler. CUDA
   builds and GPU benchmarks run via `scripts/build_cuda.sh` / `scripts/test_cuda.sh`,
   pinning a card with `CUDA_VISIBLE_DEVICES` since the box is shared.
-- The corpus theme is **federated learning / differential privacy** papers (arXiv /
-  Semantic Scholar).
+- The corpus has **no fixed theme** — the pipeline is domain-general and must never key off
+  subject matter. Papers come from arXiv / Semantic Scholar and carry a free-form `topic`
+  tag for retrieval scoping. See `atlas-rag` for the one soft constraint on the *initial*
+  corpus.
 
 ## Repository layout
 
