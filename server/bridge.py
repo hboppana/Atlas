@@ -97,8 +97,14 @@ def load_native_module(cfg: Config) -> tuple[ModuleType, Path]:
     spec = importlib.util.spec_from_file_location("_atlas_engine", path)
     if spec is None or spec.loader is None:
         raise EngineError(f"{path} is not an importable extension module")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        # An .so built against a different Python (an ABI mismatch) is an unavailable
+        # module, not a crash: EngineError keeps the SKIP-green discipline in tests and
+        # gives the server a stated reason at startup. Rebuild against this interpreter.
+        raise EngineError(f"cannot load {path}: {exc}") from exc
     return module, path
 
 
