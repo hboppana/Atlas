@@ -8,9 +8,11 @@ build*/
 *.exe
 __cmake_systeminformation
 
-# Paper corpus and processed data
+# Paper corpus and processed data (see data/.gitignore; data/ itself is tracked)
 data/papers/
+data/extracted/
 data/chunks/
+data/manifest.json
 
 # Environment / secrets
 .env

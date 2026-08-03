@@ -1,6 +1,7 @@
 # Phase 3 · Step 1 — corpus acquisition, `rag/` bring-up, PDF → text extraction
 
-> Status: **planned** — design only; no code yet.
+> Status: **done** — 2026-08-03. 43/43 seed papers extracted, 0 failures;
+> `pytest rag/tests` 18/18 green. See [Results](#results).
 > Predecessor: Phase 2 Step 8 — pybind11 bridge + FastAPI streaming — **done**
 > ([14-bridge-serving.md](14-bridge-serving.md)). Phase 2 is complete.
 > Successor: Step 2 — section-aware chunking + metadata schema.
@@ -179,6 +180,46 @@ requirements.txt                 uncomment pypdf only
 - Re-running the same command is a no-op.
 - Phase 1 and Phase 2 suites stay green (10/10 CPU CTest, 7/7 CUDA CTest, `pytest
   server/tests`) — Phase 3 adds a directory, it does not touch the engine.
+
+## Results
+
+Measured on the lab box (Suramar), 2026-08-03, CPU only — nothing here touches the GPU.
+
+| | |
+|---|---|
+| Seed list | `scripts/arxiv_ids.txt`, **43 IDs**, clustered on transformer/LLM systems + retrieval |
+| Fetched | 43/43, ~94 MB in `data/papers/` |
+| Extracted | 43/43, ~3.8 MB of JSON, 0 failures; 5–87 pages per paper |
+| Wall time | ~4 min, dominated by the 3 s inter-request arXiv delay |
+| Re-run | pure no-op: every paper logs `skip`, no file rewritten |
+| Tests | `pytest rag/tests` 18 passed in 0.10 s, no network |
+| Regression | CTest 10/10 (CPU), 17/17 (CUDA), `pytest server/tests` 27 skipped |
+
+Every ID in the seed list resolved to the intended paper — the titles arXiv returned are in
+the manifest and `--report`, which is how a mistyped ID is meant to surface.
+
+Two deviations from the design, both recorded rather than silently absorbed:
+
+- **Fetched metadata lives in the manifest record**, under a `metadata` key, not in a
+  sidecar file. `data/papers/` stays PDFs-only as documented, and extraction (which never
+  touches the network) still has the title/authors/year/categories it must copy into the
+  document. Extract on a PDF with no manifest metadata writes nulls rather than failing —
+  a locally-dropped PDF is still ingestible.
+- **`server/bridge.py` gained one `try/except`** around the extension-module import: an
+  `.so` built against a different Python raises `ImportError` from
+  `importlib.util.module_from_spec`, which escaped as an error instead of the intended
+  `EngineError` → green SKIP. Found because Phase 3's interpreter differs from the one
+  Phase 2 built against. Phase 2 behaviour is otherwise untouched.
+
+Two properties of the real output that Step 2 has to plan for, both visible in
+`data/extracted/` now rather than surfacing later as bad retrieval:
+
+- **Text is hard-wrapped at the PDF's line breaks, with hyphenation preserved** — pypdf
+  emits `"the MLM ob-\njective enables"`. Chunking has to de-hyphenate and rejoin lines
+  before a header regex or an embedding sees the text.
+- **Front matter lands in page 1's block** (1706.03762 opens with Google's reproduction
+  notice, not the title), so "the first block is the title and abstract" is not a safe
+  assumption for section detection.
 
 ## Design decisions
 

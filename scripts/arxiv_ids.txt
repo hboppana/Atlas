@@ -1,0 +1,68 @@
+# Atlas seed corpus — arXiv IDs, one per line (docs/15-rag-ingest-extraction.md).
+#
+# The pipeline is domain-general and never keys off subject matter. This list is clustered
+# around two overlapping areas — transformer/LLM systems and retrieval — for one reason
+# only: Step 4 grades retrieval with a hand-labelled question set, and both writing that
+# set and observing MMR's diversity behaviour need papers that talk to each other. Once
+# retrieval is validated the corpus broadens freely; nothing in rag/ has to change.
+#
+# Titles are what these IDs are expected to be. `--report` prints the titles arXiv
+# actually returned, so a mistyped ID is visible rather than silently ingesting the
+# wrong paper.
+
+# --- transformer architecture ---
+1706.03762   # Attention Is All You Need
+1810.04805   # BERT
+2005.14165   # GPT-3: Language Models are Few-Shot Learners
+2104.09864   # RoFormer / RoPE
+1910.07467   # Root Mean Square Layer Normalization
+2002.05202   # GLU Variants Improve Transformer (SwiGLU)
+1911.02150   # Fast Transformer Decoding: One Write-Head is All You Need (MQA)
+2305.13245   # GQA: Training Generalized Multi-Query Transformer Models
+
+# --- open models ---
+2302.13971   # LLaMA: Open and Efficient Foundation Language Models
+2307.09288   # Llama 2
+2310.06825   # Mistral 7B
+2204.02311   # PaLM
+
+# --- scaling, training, alignment ---
+2001.08361   # Scaling Laws for Neural Language Models
+2203.15556   # Training Compute-Optimal Large Language Models (Chinchilla)
+2203.02155   # InstructGPT: Training LMs to follow instructions with human feedback
+2106.09685   # LoRA: Low-Rank Adaptation
+2305.14314   # QLoRA
+
+# --- inference efficiency + quantization ---
+2205.14135   # FlashAttention
+2307.08691   # FlashAttention-2
+2309.06180   # Efficient Memory Management for LLM Serving (vLLM / PagedAttention)
+2211.05102   # Efficiently Scaling Transformer Inference
+2208.07339   # LLM.int8()
+2210.17323   # GPTQ
+2306.00978   # AWQ
+1904.09751   # The Curious Case of Neural Text Degeneration (nucleus sampling)
+
+# --- retrieval-augmented generation ---
+2005.11401   # Retrieval-Augmented Generation for Knowledge-Intensive NLP
+2002.08909   # REALM
+2004.04906   # Dense Passage Retrieval
+2007.01282   # Fusion-in-Decoder
+2112.04426   # RETRO
+2208.03299   # Atlas: Few-shot Learning with Retrieval Augmented LMs
+2310.11511   # Self-RAG
+2401.18059   # RAPTOR
+2212.10496   # HyDE: Precise Zero-Shot Dense Retrieval without Relevance Labels
+2307.03172   # Lost in the Middle
+
+# --- embeddings + rerankers ---
+1908.10084   # Sentence-BERT
+2004.12832   # ColBERT
+2112.09118   # Contriever
+2212.03533   # E5: Text Embeddings by Weakly-Supervised Contrastive Pre-training
+2309.07597   # C-Pack / BGE embeddings
+
+# --- reasoning + agents ---
+2201.11903   # Chain-of-Thought Prompting
+2205.11916   # Large Language Models are Zero-Shot Reasoners
+2210.03629   # ReAct: Synergizing Reasoning and Acting

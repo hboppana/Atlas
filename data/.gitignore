@@ -1,0 +1,9 @@
+# The corpus and everything derived from it is local state, never committed.
+# Tests use rag/tests/fixtures/*.pdf instead — no test may require the corpus on disk.
+papers/
+extracted/
+chunks/
+manifest.json
+
+# ...but this file and the directory itself are tracked.
+!.gitignore

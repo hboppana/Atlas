@@ -16,10 +16,12 @@ pybind11>=2.12
 pytest>=8.0
 httpx>=0.27
 
-# --- Phase 3: RAG (added later) ---
+# --- Phase 3: RAG ---
+# Step 1 (ingestion, docs/15) needs pypdf only; arXiv acquisition uses stdlib urllib.
+pypdf>=4.2
+# Steps 3-4: embedding + vector store, uncommented when those steps land.
 # chromadb
 # sentence-transformers
-# pypdf
 
 # --- Phase 4: agent (added later) ---
 # langchain
