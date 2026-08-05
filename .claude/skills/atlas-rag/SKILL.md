@@ -22,7 +22,7 @@ broadens freely once retrieval is validated.
 | Stage | File | What it does |
 |-------|------|--------------|
 | Ingest | `ingest.py` | **done** (Step 1, docs/15) — arXiv fetch + pypdf extraction to `data/extracted/<paper_id>.json`: page-granular blocks, source-asserted metadata, manifest-driven idempotency |
-| Chunk | `chunk.py` | **section-aware** chunking over the extracted JSON — split on abstract / methods / results rather than blind fixed-size windows; carry metadata |
+| Chunk | `chunk.py` | **designed** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`; fixed-window fallback recorded per paper |
 | Embed | `embed.py` | local embeddings via **sentence-transformers `all-MiniLM-L6-v2`**, runs on GPU |
 | Store | `store.py` | **ChromaDB** vector store — insert, index, persist to disk |
 | Retrieve | `retrieve.py` | semantic retrieval + reranking — top-k chunks with **MMR** (maximal marginal relevance) for diversity |
