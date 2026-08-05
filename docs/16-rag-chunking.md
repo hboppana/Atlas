@@ -1,6 +1,7 @@
 # Phase 3 · Step 2 — section-aware chunking + chunk metadata schema
 
-> Status: **designed** — 2026-08-05.
+> Status: **done** — 2026-08-05. See *Results* for what the corpus measured and where the
+> implementation departed from this design.
 > Predecessor: Step 1 — corpus acquisition + PDF extraction — **done**
 > ([15-rag-ingest-extraction.md](15-rag-ingest-extraction.md)). 43/43 papers extracted.
 > Successor: Step 3 — local embeddings + ChromaDB store + derived topics.
@@ -261,6 +262,63 @@ No new dependency. `chromadb` and `sentence-transformers` stay commented out unt
 - Re-running `--chunk` is a pure no-op; bumping `chunker_version` re-chunks everything.
 - Spot-check: 5 chunks read as coherent prose with correct section labels and page spans.
 - Phase 1 / Phase 2 suites stay green.
+
+## Results (2026-08-05)
+
+`scripts/ingest_papers.py --chunk` over all 43 extracted papers, default word-heuristic
+counter:
+
+| Measure | Value |
+|---|---|
+| Papers chunked / failed | **43 / 0** |
+| Strategy split | **43 `sections`, 0 `fixed`** — the target |
+| Chunks | **3489** total; per paper min 22, median 57, max 305 |
+| Token length | max **200** (the budget, exactly); median bucket 175–200; 20 chunks under 25 |
+| Chunks under `MIN_CHUNK_CHARS` | 44 / 3489, all section-final remainders |
+| Re-run | pure no-op (43 skips); `chunker_version` bump re-chunks all 43 |
+| `pytest rag/tests` | 46 passed (Step 1's 18 + 28 new), no ML deps, no network |
+
+Spot-checked chunks read as coherent prose with correct section labels, and page spans are
+truthful — `2005.11401` has 9 of 53 chunks straddling a page boundary, each reporting the
+pair. Flattened table/figure text does ride along inside body chunks, as scoped.
+
+### Where the implementation departed from the design
+
+Five things the design got wrong or under-specified, all found against the real corpus:
+
+- **The header regex was too tight.** `.{2,60}` and ≤8 words rejected real heads —
+  `3 FlashAttention-2: Algorithm, Parallelism, and Work Partitioning` is 64 chars and
+  9 words. Loosened to 100 chars / 12 words. This is safe precisely because the design's
+  own argument holds: the monotonic run, not the regex, carries the rejection.
+- **A strictly ascending run stalls.** 5/43 papers lose exactly one top-level head to pypdf
+  (small-caps kerning, a ligature in the number); requiring `n == expected` then rejected
+  every head after it and dropped those papers to `fixed`. The rule is now the design's
+  stated one — a *non-decreasing* run that must **start at 1** and may skip at most
+  `MAX_HEADER_GAP = 2`. That alone moved the split from 38/43 to **43/43**.
+- **Small-caps heads need cleaning.** pypdf renders them `1 I NTRODUCTION`; `clean_title`
+  merges the split capital and title-cases an all-caps head, so the section label that ends
+  up in a Phase 4 citation reads `Introduction`, not `I NTRODUCTION`.
+- **Overlap must fit its budget or not happen.** Carrying a tail sentence larger than
+  `OVERLAP_TOKENS` left no room for the next atom and produced 400-token chunks — double the
+  MiniLM-safe budget, which is the one failure this step exists to prevent. An oversized
+  tail is now simply not carried, and the packer drops a carry outright rather than
+  overflow. Same fix on the short-remainder merge: it happens only if the merged chunk still
+  fits the budget.
+- **Front matter is kept, not dropped.** The design left the pre-first-header text
+  unspecified. It becomes a `Front Matter` section, because 2/43 papers have no detectable
+  `Abstract` line and dropping it would silently lose their abstract — the highest-value
+  passage in the paper.
+
+Two smaller specifics the design left open: paragraph boundaries are detected as *a short
+line that ends a sentence* (pypdf emits no blank line between paragraphs, so the signal is
+that a paragraph's last line does not fill the column), and the "no chunk under
+`MIN_CHUNK_CHARS` except a final remainder" bound is per **section**, not per paper — a
+short section is emitted with its own correct label rather than merged into a neighbour it
+does not belong to.
+
+`--report` also prints a chunk-count outlier list (outside 8–400 chunks) so the "3 chunks or
+900 chunks is a detection bug wearing a plausible number" check runs on every report rather
+than by hand. The current corpus has none.
 
 ## Design decisions
 

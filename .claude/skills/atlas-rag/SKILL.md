@@ -22,19 +22,22 @@ broadens freely once retrieval is validated.
 | Stage | File | What it does |
 |-------|------|--------------|
 | Ingest | `ingest.py` | **done** (Step 1, docs/15) — arXiv fetch + pypdf extraction to `data/extracted/<paper_id>.json`: page-granular blocks, source-asserted metadata, manifest-driven idempotency |
-| Chunk | `chunk.py` | **designed** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`; fixed-window fallback recorded per paper |
+| Chunk | `chunk.py` | **done** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`. Measured: 43/43 papers `sections`, 3489 chunks, max 200 tokens |
 | Embed | `embed.py` | local embeddings via **sentence-transformers `all-MiniLM-L6-v2`**, runs on GPU |
 | Store | `store.py` | **ChromaDB** vector store — insert, index, persist to disk |
 | Retrieve | `retrieve.py` | semantic retrieval + reranking — top-k chunks with **MMR** (maximal marginal relevance) for diversity |
 
-- `scripts/ingest_papers.py --fetch [ids.txt] --ingest --report [--force] [--data-dir D]`
-  drives ingestion. Seed list: `scripts/arxiv_ids.txt` (43 papers, LLM systems + retrieval).
+- `scripts/ingest_papers.py --fetch [ids.txt] --ingest --chunk --report [--force] [--data-dir D]`
+  drives the whole pipeline. Seed list: `scripts/arxiv_ids.txt` (43 papers, LLM systems +
+  retrieval). `--report` prints status counts, chunk stats, a strategy split, and a
+  chunk-count outlier list.
 - `data/` layout: `papers/*.pdf`, `extracted/<paper_id>.json`, `chunks/`, `manifest.json` —
   **all gitignored**; only `data/.gitignore` is tracked. `paper_id` (arXiv ID, or a content
   hash for local PDFs) is the join key everywhere downstream, and chunk IDs are
   `<paper_id>:<index>`, so Phase 4's `cite_sources` resolves through it.
 - **`data/manifest.json` is the source of truth for ingestion state**: `fetched |
-  extracted | failed` per paper, written after *every* paper, with fetched arXiv metadata
+  extracted | chunked | failed` per paper — a pipeline position, not a set of flags, so
+  `chunked` implies extracted — written after *every* paper, with fetched arXiv metadata
   under a `metadata` key (extraction copies it into the document; it never re-hits the
   network). Skips are hash-based, so a changed PDF re-extracts. Failures are recorded, never
   swallowed — no OCR path, so a PDF with no text layer is a `failed` record and no document.
@@ -47,8 +50,18 @@ broadens freely once retrieval is validated.
 
 ## Conventions
 
-- **Section-aware over naïve splitting.** The chunker should respect paper structure; this is
-  the deliberate quality lever for scholarly retrieval.
+- **Section-aware over naïve splitting.** The chunker respects paper structure; this is the
+  deliberate quality lever for scholarly retrieval. What makes it work on real pypdf output:
+  the **monotonic-run gate** (a header is accepted only if its number continues an ascending
+  run starting at 1, tolerating a gap of ≤2 — pypdf mangles ~1 head per paper) rather than a
+  tighter regex, detection on **lines before** soft-wrapped lines are rejoined, and a
+  `chunker_version` in the skip condition so tuning the chunker re-chunks the corpus without
+  `--force`.
+- **The token budget is honoured through an injectable `token_counter`** (default: a
+  word heuristic) so `rag/chunk.py` and its tests need no ML deps; Step 3 injects the real
+  MiniLM tokenizer through the same seam. Overlap that does not fit `OVERLAP_TOKENS` is
+  dropped rather than carried — carrying it is what produces over-budget chunks, and MiniLM
+  silently truncates at 256 wordpieces.
 - **MMR, not plain top-k.** Retrieval optimizes for relevance *and* diversity so the agent
   sees complementary evidence rather than near-duplicate passages.
 - Keep embedding and retrieval **local and reproducible** — no external embedding APIs.

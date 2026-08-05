@@ -42,10 +42,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR = "pypdf"
 
 # Manifest statuses. `fetched` means bytes are on disk; `extracted` means data/extracted/
-# holds a document for the *current* PDF hash.
+# holds a document for the *current* PDF hash; `chunked` means data/chunks/ does too, and
+# so implies `extracted` — the statuses are a pipeline position, not a set of flags.
 FETCHED = "fetched"
 EXTRACTED = "extracted"
+CHUNKED = "chunked"
 FAILED = "failed"
+
+# Extraction is done for both of these; only the downstream stage differs.
+EXTRACTED_STATUSES = (EXTRACTED, CHUNKED)
 
 ARXIV_ID_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 ARXIV_API = "http://export.arxiv.org/api/query"
@@ -62,6 +67,11 @@ METADATA_BATCH = 50
 # A scanned paper is not always *exactly* zero characters — a title stamp or a page number
 # can survive. Below this many characters over the whole PDF there is no usable text layer.
 MIN_TEXT_CHARS = 32
+
+# Only used to flag suspicious papers in --report: a 12-page paper chunked into 3 passages
+# (detection collapsed) or 900 (detection shattered) is a bug, not a short paper.
+CHUNK_COUNT_FLOOR = 8
+CHUNK_COUNT_CEIL = 400
 
 Log = Callable[[str], None]
 
@@ -104,6 +114,9 @@ class Paths:
         for directory in (self.papers_dir, self.extracted_dir):
             directory.mkdir(parents=True, exist_ok=True)
         return self
+
+    def chunk_path(self, paper_id: str) -> Path:
+        return self.chunks_dir / f"{paper_id}.json"
 
     def pdf_path(self, paper_id: str) -> Path:
         return self.papers_dir / f"{paper_id}.pdf"
@@ -406,7 +419,12 @@ def extract_papers(paths: Paths, *, force: bool = False, log: Log = print) -> Ma
         document_path = paths.document_path(paper_id)
 
         unchanged = record.get("pdf_sha256") == digest
-        if not force and unchanged and record.get("status") == EXTRACTED and document_path.exists():
+        if (
+            not force
+            and unchanged
+            and record.get("status") in EXTRACTED_STATUSES
+            and document_path.exists()
+        ):
             log(f"  skip     {paper_id}  (unchanged)")
             continue
 
@@ -452,6 +470,35 @@ def report(paths: Paths) -> str:
     counts = manifest.counts()
     lines = [f"{paths.manifest_path}: {len(manifest.records)} paper(s)"]
     lines += [f"  {status:<10} {count}" for status, count in sorted(counts.items())]
+
+    chunked = [record for record in manifest.records.values() if record.get("status") == CHUNKED]
+    if chunked:
+        chunk_counts = sorted(record.get("chunk_count") or 0 for record in chunked)
+        strategies: dict[str, int] = {}
+        for record in chunked:
+            strategy = record.get("chunk_strategy") or "unknown"
+            strategies[strategy] = strategies.get(strategy, 0) + 1
+        lines.append("")
+        lines.append(
+            f"chunks: {sum(chunk_counts)} across {len(chunked)} paper(s) "
+            f"(min {chunk_counts[0]}, median {chunk_counts[len(chunk_counts) // 2]}, "
+            f"max {chunk_counts[-1]})"
+        )
+        lines += [f"  {strategy:<10} {count}" for strategy, count in sorted(strategies.items())]
+        # A paper at either extreme is a detection bug wearing a plausible number.
+        outliers = sorted(
+            (
+                (paper_id, record.get("chunk_count") or 0, record.get("chunk_strategy") or "?")
+                for paper_id, record in manifest.records.items()
+                if record.get("status") == CHUNKED
+                and not (CHUNK_COUNT_FLOOR <= (record.get("chunk_count") or 0) <= CHUNK_COUNT_CEIL)
+            ),
+            key=lambda row: row[1],
+        )
+        if outliers:
+            lines.append("  outliers (chunk count outside "
+                         f"{CHUNK_COUNT_FLOOR}..{CHUNK_COUNT_CEIL}):")
+            lines += [f"    {paper_id:<14} {count:>4}  {strategy}" for paper_id, count, strategy in outliers]
 
     failures = manifest.failures()
     if failures:
