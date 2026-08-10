@@ -4,7 +4,8 @@
 > implementation departed from this design.
 > Predecessor: Step 1 — corpus acquisition + PDF extraction — **done**
 > ([15-rag-ingest-extraction.md](15-rag-ingest-extraction.md)). 43/43 papers extracted.
-> Successor: Step 3 — local embeddings + ChromaDB store + derived topics.
+> Successor: Step 3 — local embeddings + ChromaDB store + derived topics
+> ([17-rag-embeddings-store.md](17-rag-embeddings-store.md)).
 
 ## Goal
 
