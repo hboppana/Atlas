@@ -1,9 +1,14 @@
 # Phase 3 · Step 3 — local embeddings + ChromaDB store + derived topics
 
-> Status: **design** — 2026-08-10.
+> Status: **done** — designed 2026-08-10, implemented 2026-08-18. See *Results* below.
 > Predecessor: Step 2 — section-aware chunking — **done**
-> ([16-rag-chunking.md](16-rag-chunking.md)). 43/43 papers `sections`, 3489 chunks.
+> ([16-rag-chunking.md](16-rag-chunking.md)). 43/43 papers `sections`.
 > Successor: Step 4 — MMR retrieval + a retrieval eval set.
+>
+> Two things did not survive contact with the corpus, both recorded in *Results*: the word
+> heuristic's token budget **failed** the truncation check (334/3489 chunks truncated), so
+> the corpus is re-chunked at `CHUNKER_VERSION = 2` with the real tokenizer; and
+> `embedding_function=None` turned out **not** to stop Chroma embedding on its own.
 
 ## Goal
 
@@ -315,6 +320,101 @@ docs/17-rag-embeddings-store.md  this file
   on every run.
 - **A flag on the existing CLI, not a new script** — third time, same reason: one manifest,
   one report, one entry point, with separate status transitions doing the failure isolation.
+
+## Results (2026-08-18)
+
+Measured on the 43-paper corpus. `pytest rag/tests` is **93 passed**; Phase 1 `ctest` stays
+10/10; `server/tests` is unchanged (27 skipped — the pre-existing extension-ABI skip).
+
+### The truncation check failed, and the seam paid for itself
+
+The whole point of the check was to find out whether Step 2's `ceil(words * 1.35)` budget
+held. It did not:
+
+```
+tokens: max 1383, p99 408, over 256: 334 / 3489     # chunker v1, word heuristic
+```
+
+The heuristic undercounts by **1.10x at the median but 2.14x at p99 and 6.92x at worst** —
+the tail is equation-dense text, dumped result tables (`RoBbase (AdptD)* 0.3M 87.1±.0 ...`),
+long URLs, and eight papers where pypdf emits a broken font encoding as raw control bytes.
+Every one of those 334 chunks was being silently cut off mid-passage before this ran.
+
+The prescribed repair was applied verbatim: inject `rag.embed.minilm_token_counter` into
+`chunk_papers`, bump `CHUNKER_VERSION` to 2, re-chunk, re-embed.
+
+```
+chunks: 4148 across 43 paper(s) (min 25, median 68, max 344)
+  sections   43
+  minilm     43
+tokens: max 200, p99 200, over 256: 0 / 4148        # chunker v2, real tokenizer
+```
+
+3489 → **4148 chunks** (+19%), and the histogram now pins to the 200-token budget exactly,
+because the budget is finally measured in the units the encoder uses.
+
+One implementation note the design did not anticipate: *which* counter produced a chunk file
+has to be **recorded**, not just implied by `chunker_version`. The default stays the
+heuristic (docs/17's non-reproducibility argument is right), so the same version number can
+describe two different chunkings. `token_counter: "heuristic" | "minilm"` now sits in the
+chunk payload, the manifest, and the skip key, and `--chunk --exact-tokens` is the flag that
+selects it. Without that field the corpus would silently revert to heuristic chunks on the
+next `--chunk`.
+
+Still open, and **not** Step 3's to fix (scope boundary: not re-extraction): 8 papers carry
+pypdf font-encoding mojibake in 25 chunks total, worst `2210.03629` (ReAct). It is junk
+content that will retrieve. That belongs to a Step 1/2 extraction fix.
+
+### `embedding_function=None` does not stop Chroma embedding
+
+The design called this "load-bearing", and it is — but the mechanism named does not work.
+On chromadb 1.5.9, `embedding_function=None` reads as *unspecified*, and Chroma installs its
+default: the test asserting a text query fails instead downloaded the 79 MB ONNX MiniLM
+bundle and answered the query with it. Exactly the invisible train/serve skew the design was
+guarding against, arriving through the guard itself.
+
+`rag/store.py` now passes `ExplicitVectorsOnly`, an `EmbeddingFunction` whose `__call__`
+raises. Any path that forgets `embeddings=` is a loud `IngestError` naming this document.
+`test_chroma_never_embeds_anything_itself` asserts both the query and the add path raise.
+
+### Topics
+
+```
+topics: k=2 silhouette=0.1576
+  topic_0   26 paper(s)  retrieval, passages, question
+  topic_1   17 paper(s)  quantization, gpu, bit
+```
+
+k=2 over k∈[2,8] — the seed corpus really is two overlapping areas (retrieval/RAG and
+LLM systems/efficiency), which is what the `atlas-rag` "clustered around one or two areas"
+constraint asked for. Silhouette 0.16 is low in absolute terms and should be: paper vectors
+in one field are not well-separated blobs, and a 384-d mean-pooled abstract is a blunt
+instrument. The labels are recognisable, which is the bar the design set.
+
+### Query probes
+
+Four probes, `-k 3`, all returning the obviously-correct paper at **rank 1**:
+
+| Query | Rank 1 | Score |
+|---|---|---|
+| `flash attention tiling and IO awareness` | FlashAttention | 0.771 |
+| `int8 quantization of transformer weights` | LLM.int8() | 0.662 |
+| `chain of thought prompting elicits reasoning` | Chain-of-Thought Prompting | 0.828 |
+| `maximal marginal relevance for diverse retrieval` | HyDE (then REALM at 3) | 0.694 |
+
+The last one has no exactly-matching paper in the corpus — MMR is Step 4's algorithm, not a
+corpus paper — and it surfaces the dense-retrieval cluster, which is the right answer.
+
+### The encoder ran on CPU, not the A6000
+
+`torch 2.13.0+cu130` (what `pip install sentence-transformers` resolves to today) needs a
+newer NVIDIA driver than the box has (driver reports 12060), so `torch.cuda.is_available()`
+is False and `--embed` falls back to CPU. It does not matter much at this size — the full
+4148-chunk corpus embeds in well under a minute, and CPU/GPU MiniLM agree to ~1e-6 — but the
+documented `CUDA_VISIBLE_DEVICES=0` invocation is not actually using the GPU. Fixing it means
+installing a cu126-matched torch wheel, which touches the same torch that Phase 1's
+validate-against-HuggingFace tooling depends on, so it is deliberately left alone here rather
+than changed as a side effect of Step 3. `--device` overrides on demand.
 
 ## Next (Step 4)
 

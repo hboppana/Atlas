@@ -3,7 +3,10 @@
 papers/
 extracted/
 chunks/
+embeddings/
+chroma/
 manifest.json
+topics.json
 
 # ...but this file and the directory itself are tracked.
 !.gitignore

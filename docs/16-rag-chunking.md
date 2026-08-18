@@ -283,6 +283,34 @@ Spot-checked chunks read as coherent prose with correct section labels, and page
 truthful — `2005.11401` has 9 of 53 chunks straddling a page boundary, each reporting the
 pair. Flattened table/figure text does ride along inside body chunks, as scoped.
 
+### Superseded by chunker v2 (2026-08-18) — the heuristic's budget did not hold
+
+The numbers above are the **v1** corpus, and the "max 200 (the budget, exactly)" line is
+measured in *heuristic* tokens. Step 3's truncation check
+([17-rag-embeddings-store.md](17-rag-embeddings-store.md) § Results) counted the same chunks
+with MiniLM's real tokenizer and found **334 / 3489 over the 256-wordpiece window** — max
+1383. The heuristic undercounts 1.10x at the median but 2.14x at p99: fine for prose, badly
+wrong for equations, result tables, long URLs, and pypdf font-encoding mojibake.
+
+This is the failure the injectable `token_counter` was put here to allow fixing, and it was
+fixed exactly as planned — `CHUNKER_VERSION = 2`, real tokenizer injected, corpus re-chunked:
+
+| Measure | v1 (heuristic) | v2 (`--exact-tokens`) |
+|---|---|---|
+| Chunks | 3489 | **4148** (+19%) |
+| True wordpieces, max / p99 | 1383 / 408 | **200 / 200** |
+| Chunks over 256 | **334** | **0** |
+
+Two things changed in this file's contract as a result:
+
+- The chunk payload and the manifest now carry **`token_counter: "heuristic" | "minilm"`**,
+  and it joins the extracted hash + `chunker_version` in the **skip key**. The default is
+  still the heuristic (the non-reproducibility argument in *Design decisions* stands), so
+  without recording the choice a `--chunk` run would silently revert the corpus to heuristic
+  chunks while every version number still matched.
+- `scripts/ingest_papers.py --chunk --exact-tokens` is how the corpus is built. Plain
+  `--chunk` remains dependency-free and is what the tests exercise.
+
 ### Where the implementation departed from the design
 
 Five things the design got wrong or under-specified, all found against the real corpus:

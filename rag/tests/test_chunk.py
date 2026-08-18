@@ -326,6 +326,54 @@ def test_a_bumped_chunker_version_rechunks(corpus: Paths):
     assert load_chunks(corpus, "2101.00010")["chunker_version"] == CHUNKER_VERSION + 1
 
 
+def test_the_default_counter_is_the_dependency_free_heuristic(corpus: Paths):
+    """docs/17: the chunker's output must never depend on whether ML deps are installed."""
+    from rag.chunk import HEURISTIC_COUNTER
+
+    manifest = chunk_papers(corpus, log=lambda _: None)
+    assert manifest.get("2101.00010")["token_counter"] == HEURISTIC_COUNTER
+    assert load_chunks(corpus, "2101.00010")["token_counter"] == HEURISTIC_COUNTER
+
+
+def test_swapping_the_token_counter_rechunks(corpus: Paths):
+    """The seam that repairs a failed truncation check: same chunker version, different
+    counter, so a heuristic-chunked file is never mistaken for an exactly-chunked one."""
+    from rag.chunk import EXACT_COUNTER
+
+    chunk_papers(corpus, log=lambda _: None)
+    logged: list[str] = []
+    manifest = chunk_papers(
+        corpus,
+        token_counter=lambda text: len(text.split()) * 3,  # stands in for the real tokenizer
+        token_counter_name=EXACT_COUNTER,
+        log=logged.append,
+    )
+    assert not any("skip" in line for line in logged)
+    assert manifest.get("2101.00010")["token_counter"] == EXACT_COUNTER
+    assert load_chunks(corpus, "2101.00010")["token_counter"] == EXACT_COUNTER
+
+    # ...and running it again with the same counter is a no-op, not a permanent rewrite.
+    logged.clear()
+    chunk_papers(
+        corpus,
+        token_counter=lambda text: len(text.split()) * 3,
+        token_counter_name=EXACT_COUNTER,
+        log=logged.append,
+    )
+    assert sum("skip" in line for line in logged) == 2
+
+
+def test_an_expensive_counter_bounds_chunks_by_its_own_measure(corpus: Paths):
+    """A counter that reports 3x the heuristic must produce correspondingly smaller chunks —
+    this is what makes injecting the real tokenizer actually fix over-budget chunks."""
+    from rag.chunk import EXACT_COUNTER
+
+    triple = lambda text: len(text.split()) * 3  # noqa: E731
+    chunk_papers(corpus, token_counter=triple, token_counter_name=EXACT_COUNTER, log=lambda _: None)
+    for chunk in load_chunks(corpus, "2101.00010")["chunks"]:
+        assert triple(chunk["text"]) <= TARGET_TOKENS or len(chunk["text"].split()) == 1
+
+
 def test_a_changed_extraction_rechunks(corpus: Paths):
     chunk_papers(corpus, log=lambda _: None)
     write_json(

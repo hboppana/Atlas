@@ -19,9 +19,10 @@ httpx>=0.27
 # --- Phase 3: RAG ---
 # Step 1 (ingestion, docs/15) needs pypdf only; arXiv acquisition uses stdlib urllib.
 pypdf>=4.2
-# Steps 3-4: embedding + vector store, uncommented when those steps land.
-# chromadb
-# sentence-transformers
+# Step 3 (embeddings + vector store, docs/17). sentence-transformers pulls torch +
+# transformers, both already pinned above; chromadb is the only genuinely new tree.
+chromadb>=0.5
+sentence-transformers>=3.0
 
 # --- Phase 4: agent (added later) ---
 # langchain

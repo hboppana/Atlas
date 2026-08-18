@@ -43,14 +43,18 @@ EXTRACTOR = "pypdf"
 
 # Manifest statuses. `fetched` means bytes are on disk; `extracted` means data/extracted/
 # holds a document for the *current* PDF hash; `chunked` means data/chunks/ does too, and
-# so implies `extracted` — the statuses are a pipeline position, not a set of flags.
+# `embedded` means data/embeddings/ does as well — the statuses are a pipeline position,
+# not a set of flags, so `embedded` implies `chunked` implies `extracted`.
 FETCHED = "fetched"
 EXTRACTED = "extracted"
 CHUNKED = "chunked"
+EMBEDDED = "embedded"
 FAILED = "failed"
 
-# Extraction is done for both of these; only the downstream stage differs.
-EXTRACTED_STATUSES = (EXTRACTED, CHUNKED)
+# Extraction is done for all of these; only the downstream stage differs.
+EXTRACTED_STATUSES = (EXTRACTED, CHUNKED, EMBEDDED)
+# ...and chunking is done for these, which is why `--embed` does not undo `--chunk`'s skip.
+CHUNKED_STATUSES = (CHUNKED, EMBEDDED)
 
 ARXIV_ID_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 ARXIV_API = "http://export.arxiv.org/api/query"
@@ -107,6 +111,18 @@ class Paths:
         return self.data_dir / "chunks"
 
     @property
+    def embeddings_dir(self) -> Path:
+        return self.data_dir / "embeddings"
+
+    @property
+    def chroma_dir(self) -> Path:
+        return self.data_dir / "chroma"
+
+    @property
+    def topics_path(self) -> Path:
+        return self.data_dir / "topics.json"
+
+    @property
     def manifest_path(self) -> Path:
         return self.data_dir / "manifest.json"
 
@@ -117,6 +133,9 @@ class Paths:
 
     def chunk_path(self, paper_id: str) -> Path:
         return self.chunks_dir / f"{paper_id}.json"
+
+    def embedding_path(self, paper_id: str) -> Path:
+        return self.embeddings_dir / f"{paper_id}.npz"
 
     def pdf_path(self, paper_id: str) -> Path:
         return self.papers_dir / f"{paper_id}.pdf"
@@ -471,13 +490,18 @@ def report(paths: Paths) -> str:
     lines = [f"{paths.manifest_path}: {len(manifest.records)} paper(s)"]
     lines += [f"  {status:<10} {count}" for status, count in sorted(counts.items())]
 
-    chunked = [record for record in manifest.records.values() if record.get("status") == CHUNKED]
+    chunked = [
+        record for record in manifest.records.values() if record.get("status") in CHUNKED_STATUSES
+    ]
     if chunked:
         chunk_counts = sorted(record.get("chunk_count") or 0 for record in chunked)
         strategies: dict[str, int] = {}
+        counters: dict[str, int] = {}
         for record in chunked:
             strategy = record.get("chunk_strategy") or "unknown"
             strategies[strategy] = strategies.get(strategy, 0) + 1
+            counter = record.get("token_counter") or "unknown"
+            counters[counter] = counters.get(counter, 0) + 1
         lines.append("")
         lines.append(
             f"chunks: {sum(chunk_counts)} across {len(chunked)} paper(s) "
@@ -485,12 +509,15 @@ def report(paths: Paths) -> str:
             f"max {chunk_counts[-1]})"
         )
         lines += [f"  {strategy:<10} {count}" for strategy, count in sorted(strategies.items())]
+        # Which token counter measured the budget — the difference between "200 estimated
+        # tokens" and "200 wordpieces the encoder will actually see".
+        lines += [f"  {counter:<10} {count}" for counter, count in sorted(counters.items())]
         # A paper at either extreme is a detection bug wearing a plausible number.
         outliers = sorted(
             (
                 (paper_id, record.get("chunk_count") or 0, record.get("chunk_strategy") or "?")
                 for paper_id, record in manifest.records.items()
-                if record.get("status") == CHUNKED
+                if record.get("status") in CHUNKED_STATUSES
                 and not (CHUNK_COUNT_FLOOR <= (record.get("chunk_count") or 0) <= CHUNK_COUNT_CEIL)
             ),
             key=lambda row: row[1],
@@ -499,6 +526,16 @@ def report(paths: Paths) -> str:
             lines.append("  outliers (chunk count outside "
                          f"{CHUNK_COUNT_FLOOR}..{CHUNK_COUNT_CEIL}):")
             lines += [f"    {paper_id:<14} {count:>4}  {strategy}" for paper_id, count, strategy in outliers]
+
+    # Embeddings, topics and the collection size — imported here rather than at module
+    # scope so `--report` still works on a checkout with neither numpy nor chromadb.
+    try:
+        from .embed import report_lines
+    except ImportError as exc:
+        lines.append("")
+        lines.append(f"embeddings: unavailable ({exc})")
+    else:
+        lines += report_lines(paths)
 
     failures = manifest.failures()
     if failures:

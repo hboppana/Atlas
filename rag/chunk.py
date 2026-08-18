@@ -32,6 +32,7 @@ from typing import Callable, Sequence
 
 from .ingest import (
     CHUNKED,
+    CHUNKED_STATUSES,
     FAILED,
     Log,
     Manifest,
@@ -43,7 +44,13 @@ from .ingest import (
 )
 
 # Bumping this re-chunks the corpus on the next `--chunk` — the intended iteration loop.
-CHUNKER_VERSION = 1
+#
+# v2: Step 3's truncation check (docs/17) measured the real wordpiece counts and found the
+#     `estimate_tokens` heuristic undercounting by 1.10x at the median but 2.14x at p99 and
+#     6.9x at worst, putting 334 / 3489 chunks past MiniLM's 256-token window where they
+#     were silently truncated. The corpus is now chunked with the exact tokenizer injected
+#     (`--exact-tokens`); the heuristic remains the default, see `TokenCounter` below.
+CHUNKER_VERSION = 2
 
 # all-MiniLM-L6-v2 truncates at 256 wordpieces; 200 leaves headroom for the estimate
 # undercounting, and the overlap protects claims that straddle a boundary.
@@ -68,6 +75,14 @@ REPEATED_LINE_MIN_PAGES = 4
 REFERENCES_MIN_POSITION = 0.3
 
 TokenCounter = Callable[[str], int]
+
+# Which counter produced a chunk file. The *default* stays the dependency-free heuristic:
+# making the chunker's output depend on whether sentence-transformers happens to be
+# installed would be a non-reproducibility bug, not a feature. The corpus is instead built
+# with `--exact-tokens`, and the choice is recorded here and in the skip key so a file
+# chunked one way is never mistaken for a file chunked the other.
+HEURISTIC_COUNTER = "heuristic"
+EXACT_COUNTER = "minilm"
 
 
 # --------------------------------------------------------------------------------------
@@ -564,6 +579,7 @@ def chunk_document(
     *,
     source_sha256: str = "",
     token_counter: TokenCounter = estimate_tokens,
+    token_counter_name: str = HEURISTIC_COUNTER,
     chunker_version: int = CHUNKER_VERSION,
 ) -> dict:
     """Extracted document -> the chunk-file payload. Pure, deterministic, no I/O."""
@@ -607,6 +623,7 @@ def chunk_document(
     return {
         "paper_id": paper_id,
         "chunker_version": chunker_version,
+        "token_counter": token_counter_name,
         "source_sha256": source_sha256,
         "strategy": strategy,
         "sections_detected": len(sections) if strategy == "sections" else 0,
@@ -621,6 +638,7 @@ def chunk_papers(
     *,
     force: bool = False,
     token_counter: TokenCounter = estimate_tokens,
+    token_counter_name: str = HEURISTIC_COUNTER,
     chunker_version: int = CHUNKER_VERSION,
     log: Log = print,
 ) -> Manifest:
@@ -640,9 +658,11 @@ def chunk_papers(
         chunk_path = paths.chunk_path(paper_id)
 
         current = (
-            record.get("status") == CHUNKED
+            # `embedded` is downstream of `chunked`, so it must not re-chunk the corpus.
+            record.get("status") in CHUNKED_STATUSES
             and record.get("extracted_sha256") == digest
             and record.get("chunker_version") == chunker_version
+            and record.get("token_counter") == token_counter_name
             and chunk_path.exists()
         )
         if not force and current:
@@ -655,6 +675,7 @@ def chunk_papers(
                 document,
                 source_sha256=digest,
                 token_counter=token_counter,
+                token_counter_name=token_counter_name,
                 chunker_version=chunker_version,
             )
         except (PaperError, json.JSONDecodeError) as exc:
@@ -675,6 +696,7 @@ def chunk_papers(
             extracted_sha256=digest,
             chunked_at=_utc_now(),
             chunker_version=chunker_version,
+            token_counter=token_counter_name,
             chunk_count=len(payload["chunks"]),
             chunk_strategy=payload["strategy"],
             error=None,
@@ -698,6 +720,8 @@ def load_chunks(paths: Paths, paper_id: str) -> dict:
 __all__ = [
     "CHUNKED",
     "CHUNKER_VERSION",
+    "EXACT_COUNTER",
+    "HEURISTIC_COUNTER",
     "MIN_CHUNK_CHARS",
     "OVERLAP_TOKENS",
     "TARGET_TOKENS",
