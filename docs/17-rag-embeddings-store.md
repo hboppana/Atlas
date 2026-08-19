@@ -3,7 +3,7 @@
 > Status: **done** — designed 2026-08-10, implemented 2026-08-18. See *Results* below.
 > Predecessor: Step 2 — section-aware chunking — **done**
 > ([16-rag-chunking.md](16-rag-chunking.md)). 43/43 papers `sections`.
-> Successor: Step 4 — MMR retrieval + a retrieval eval set.
+> Successor: Step 4 — MMR retrieval + a retrieval eval set ([18-rag-retrieval.md](18-rag-retrieval.md)).
 >
 > Two things did not survive contact with the corpus, both recorded in *Results*: the word
 > heuristic's token budget **failed** the truncation check (334/3489 chunks truncated), so
