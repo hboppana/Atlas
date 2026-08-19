@@ -22,10 +22,10 @@ broadens freely once retrieval is validated.
 | Stage | File | What it does |
 |-------|------|--------------|
 | Ingest | `ingest.py` | **done** (Step 1, docs/15) — arXiv fetch + pypdf extraction to `data/extracted/<paper_id>.json`: page-granular blocks, source-asserted metadata, manifest-driven idempotency |
-| Chunk | `chunk.py` | **done** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`. Measured at `CHUNKER_VERSION = 2`: 43/43 papers `sections`, **4148 chunks**, max 200 true wordpieces |
+| Chunk | `chunk.py` | **done** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`. Measured at `CHUNKER_VERSION = 3`: 43/43 papers `sections`, **3656 chunks**, max 200 true wordpieces |
 | Embed | `embed.py` | **done** (Step 3, docs/17) — `all-MiniLM-L6-v2` pinned by revision, L2-normalized fp32 vectors cached to `data/embeddings/<paper_id>.npz`, plus from-scratch numpy k-means + silhouette + term-statistic labels → `data/topics.json` |
 | Store | `store.py` | **done** (Step 3, docs/17) — `ChunkStore` over a ChromaDB `PersistentClient` at `data/chroma/`; delete-by-paper then add, scalars-only metadata, explicit vectors on every call |
-| Retrieve | `retrieve.py` | **done** (Step 4, docs/18) — `retrieve()`: HNSW top-40 candidates (filters pushed into the Chroma `where`), then exact **MMR** in numpy at `DEFAULT_LAMBDA = 0.7` with a relaxing 2-chunk-per-paper cap, returning frozen `Result` rows. Measured on `rag/eval/queries.json` (34 queries + 2 probes): **recall@5 0.91, MRR 0.79, 3.9 distinct papers** |
+| Retrieve | `retrieve.py` | **done** (Step 4, docs/18) — `retrieve()`: HNSW top-40 candidates (filters pushed into the Chroma `where`), then exact **MMR** in numpy at `DEFAULT_LAMBDA = 0.7` with a relaxing 2-chunk-per-paper cap, returning frozen `Result` rows. Measured on `rag/eval/queries.json` (34 queries + 2 probes): **recall@5 0.94, recall@3 0.91, MRR 0.80, 3.9 distinct papers** |
 
 - `scripts/ingest_papers.py --fetch [ids.txt] --ingest --chunk [--exact-tokens] --embed
   [--device D] --query TEXT [-k N] --report [--force] [--data-dir D]` drives the whole
@@ -47,15 +47,21 @@ broadens freely once retrieval is validated.
   `rag/tests/fixtures/make_fixtures.py`; no test needs the corpus or the network. Step 3's
   heavy deps are quarantined the same way: everything but "call the model" runs against
   `conftest.StubEmbedder` (SHA-256 → unit vector), and the real-model tests are
-  `importorskip`-guarded. `pytest rag/tests` = **120 passed**.
+  `importorskip`-guarded. `pytest rag/tests` = **123 passed**.
 - Embeddings can be generated on the lab box's A6000 GPUs for the full corpus (pin a card
   with `CUDA_VISIBLE_DEVICES` since it is shared).
 - `requirements.txt`: `pypdf` (Step 1), `chromadb` + `sentence-transformers` (Step 3). Step 4
   added **no** dependency: MMR and the metrics are numpy and arithmetic.
-- **Known defect, measured not fixed:** Step 2's section detector attributes everything after
-  an Acknowledgements header to that section — 699/4148 chunks (17%, 25 papers). Excluding
-  them lifts recall@5 from 0.91 to 0.94. The fix is a `CHUNKER_VERSION = 3` that treats
-  acknowledgements as terminal like the bibliography, plus a re-chunk and re-embed.
+- **A contents page is adversarial input for the monotonic-run gate**, and was the real cause
+  of the "17% of chunks are Acknowledgements" defect Step 4's eval surfaced: its entries carry
+  the paper's section numbers in order, so the run is consumed on the contents page and every
+  real header is rejected. `CHUNKER_VERSION = 3` drops contents entries before detection
+  (anchored on dot leaders; bare `4 Results 4` entries only next to a leader line, or real
+  table rows get eaten) and lowers `REFERENCES_MIN_POSITION` 0.3 → 0.05, which was rejecting
+  the real References header on papers whose appendix dwarfs the body. recall@5 0.91 → 0.94.
+- **Structural chunk metrics cannot see this class of bug.** 43/43 on the sections path and
+  0 over-budget chunks looked healthy while two detectors were confidently wrong; only the
+  retrieval eval caught it. Measure downstream.
 
 ## Conventions
 

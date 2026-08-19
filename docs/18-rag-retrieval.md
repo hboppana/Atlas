@@ -256,11 +256,11 @@ argument that kept `scikit-learn` out of Step 3's k-means.
 
 ## Done when
 
-- `pytest rag/tests` green (Step 1–3's 93 plus the new ones) on a checkout with no ML deps. ✅ 120
+- `pytest rag/tests` green (Step 1–3's 93 plus the new ones) on a checkout with no ML deps. ✅ 123
 - `--search` returns 5 results in the documented shape, and λ=1.0 reproduces `--query`.
 - `--eval` runs the full set and prints recall@1/3/5, MRR, distinct-papers and the miss list,
   at both λ=1.0 and the default, with both pasted into *Results*.
-- recall@5 ≥ 0.85 at the default λ, or the shortfall is explained here rather than tuned away. ✅ 0.91
+- recall@5 ≥ 0.85 at the default λ, or the shortfall is explained here rather than tuned away. ✅ 0.94
 - `queries.json` has ≥20 queries, every `expected_papers` ID in the corpus. ✅ 36 entries
 - Phase 1 / Phase 2 suites stay green.
 
@@ -284,7 +284,12 @@ argument that kept `scikit-learn` out of Step 3's k-means.
 
 ## Results (2026-08-19)
 
-`pytest rag/tests` — **120 passed** (Steps 1–3's 93 plus 27 new), CPU, no GPU needed.
+`pytest rag/tests` — **123 passed** (Steps 1–3's 93, 27 new here, 3 more with the chunker
+fix below), CPU, no GPU needed.
+
+All numbers below are on the **v3 corpus** (3656 chunks). The eval was first run against v2
+and drove a chunker fix mid-step; both sets of numbers are kept, because the difference
+between them is the most useful thing this step produced.
 
 ### The λ sweep, and an honest note about it
 
@@ -292,18 +297,18 @@ argument that kept `scikit-learn` out of Step 3's k-means.
 
 | λ | recall@1 | recall@3 | recall@5 | MRR | distinct papers |
 |---|---|---|---|---|---|
-| 1.0 (plain top-k) | 0.71 | 0.82 | 0.91 | 0.78 | 3.6 |
-| 0.9 | 0.71 | 0.82 | **0.94** | 0.79 | 3.9 |
-| 0.8 | 0.71 | 0.85 | 0.91 | 0.79 | 3.8 |
-| **0.7 (shipped)** | 0.71 | **0.88** | 0.91 | **0.79** | 3.9 |
-| 0.6 (originally proposed) | 0.71 | 0.85 | 0.85 | 0.76 | 4.0 |
-| 0.5 | 0.71 | 0.82 | 0.85 | 0.76 | 4.1 |
-| 0.3 | 0.71 | 0.82 | 0.85 | 0.76 | 4.2 |
+| 1.0 (plain top-k) | 0.71 | 0.85 | 0.91 | 0.78 | 3.6 |
+| 0.9 | 0.71 | 0.88 | 0.94 | 0.79 | 3.9 |
+| 0.8 | 0.71 | 0.85 | 0.94 | 0.80 | 3.8 |
+| **0.7 (shipped)** | 0.71 | **0.91** | **0.94** | **0.80** | 3.9 |
+| 0.6 (originally proposed) | 0.71 | 0.85 | 0.88 | 0.77 | 4.0 |
+| 0.5 | 0.71 | 0.85 | 0.88 | 0.77 | 4.2 |
 
 The design proposed λ = 0.6 as a guess, and it was **wrong**: it costs 6 points of recall@5
-and 2 points of MRR to buy 0.4 of a paper. λ = 0.7 dominates plain top-k outright — same
-recall@5, better recall@3 and MRR, and 3.6 → 3.9 distinct papers — so the default changed
-here, exactly as the design said it would if the drop was material.
+and 3 points of MRR to buy 0.4 of a paper. λ = 0.7 dominates plain top-k outright — 3 points
+of recall@5, 6 of recall@3, 2 of MRR, and 3.6 → 3.9 distinct papers — so the default changed
+here, exactly as the design said it would if the drop was material. (The same ordering held
+on the v2 corpus, at 0.91/0.88 instead of 0.94/0.91.)
 
 **The 0.7 is fitted to this eval set, not held out from it.** Nothing was tuned except this
 one scalar, and the set was not edited after being measured — but a number chosen on the set
@@ -311,36 +316,43 @@ it is scored against is worth less than the table makes it look, and the honest 
 "0.7 is not worse than top-k on 34 queries", not "0.7 generalises". recall@1 is identical at
 every λ, which is the expected sanity check: MMR cannot change the first pick.
 
-### Acknowledgements sections are eating the corpus
+### Acknowledgements sections were eating the corpus — two chunker bugs, now fixed
 
-The three λ=0.7 misses are `self-attention`, `token-level-matching`, `serving-partitioning`,
-and looking at what came back instead is the most useful thing this eval produced. Two of
-the three are topped by chunks whose section is **Acknowledgements** — from papers that have
-nothing to do with the question.
+The first eval run (v2 corpus) missed three queries, and two of them were topped by chunks
+whose section was **Acknowledgements**, from papers with nothing to do with the question.
+`699 / 4148 chunks — 17% of the corpus, 25 papers` carried that title. Rerunning the eval
+with those chunks excluded predicted **recall@5 0.91 → 0.94**, so it was worth chasing.
 
-`699 / 4148 chunks (17% of the corpus, 25 papers)` carry an acknowledgements section title.
-That is far too many for actual acknowledgements text: Step 2's section detector accepts the
-Acknowledgements header and then attributes **everything after it** — appendices, extra
-results, sometimes a good chunk of the paper — to that section, because no later header
-continues the monotonic run. So the label is wrong on a sixth of the corpus, and the
-generic-prose passages inside it are exactly the kind of text MiniLM finds mildly similar to
-every question.
+Two independent defects in Step 2, both written up in
+[16-rag-chunking.md](16-rag-chunking.md) § *Superseded by chunker v3*:
 
-Re-running the eval with those chunks excluded, everything else identical:
+1. **A contents page hijacks the monotonic-run gate.** PaLM's table of contents carries the
+   paper's real section numbers in ascending order, so the run was consumed on page 2 and
+   every real header afterwards was rejected — 2510 of 2595 lines in one section.
+2. **`REFERENCES_MIN_POSITION = 0.3` rejected three real References headers**, on the papers
+   whose appendix is three times their body. The bibliography then landed inside whatever
+   section preceded it.
 
-```
-lambda=0.7, acknowledgement sections excluded   (34 queries, 2 probes, k=5)
-  recall@1  0.71   recall@3  0.88   recall@5  0.94
-  mrr       0.80   distinct papers per query  3.9
-  misses: 2  (self-attention, token-level-matching)
-```
+Fixed at `CHUNKER_VERSION = 3` (contents entries dropped ahead of detection, anchored on dot
+leaders; floor lowered to 0.05), corpus re-chunked and re-embedded:
 
-**recall@5 0.91 → 0.94 for free.** This is a Step 2 defect with a Step 4 symptom, and the
-fix is a `CHUNKER_VERSION` bump that treats acknowledgements as a terminal section the way
-the bibliography already is, then a re-chunk and re-embed of the corpus. It is deliberately
-*not* done here: it changes 17% of the chunks, which would invalidate the numbers above, and
-Step 4 does not get to quietly re-chunk the corpus while claiming a retrieval improvement.
-Filtering it at query time was also rejected — it would hide a data bug inside a policy.
+| | v2 corpus | v3 corpus |
+|---|---|---|
+| Chunks | 4148 | 3656 |
+| Acknowledgements-titled chunks | 699 (17%) | 98 (2.7%) |
+| recall@1 / @3 / @5 (λ=0.7) | 0.71 / 0.88 / 0.91 | 0.71 / **0.91** / **0.94** |
+| MRR | 0.79 | **0.80** |
+| Misses | 3 | **2** |
+
+The predicted 0.94 is exactly what the rebuilt corpus delivered, and λ = 0.7 is still the
+best setting after the rebuild (recall@3 0.91 and recall@5 0.94 against 0.85 / 0.91 for
+plain top-k) — a default that survives a 12% change in the corpus is worth slightly more
+than one fitted to a single snapshot, though it is still fitted.
+
+**This is the argument for the eval set existing at all.** Both bugs sat in a corpus that
+looked healthy on every statistic Step 2 reports — 43/43 papers on the sections path, no
+over-budget chunks, sane chunk counts — and neither was visible until something downstream
+measured whether the right paper came back.
 
 ### The remaining two misses are the encoder, not the pipeline
 
@@ -351,7 +363,7 @@ Filtering it at query time was also rejected — it would hide a data bug inside
   written deliberately without reusing the title, and a bi-encoder with a 384-d MiniLM is
   what a paraphrase gap looks like.
 - `token-level-matching` (ColBERT) surfaces DPR and BERT instead — semantically adjacent
-  papers on the same task. A cross-encoder rerank over the top 40 is the obvious fix, and it
+  papers on the same task, and unchanged by the chunker fix. A cross-encoder rerank over the top 40 is the obvious fix, and it
   is out of scope by design. **This is the measurement that would justify adding one.**
 
 ### Probes behave as hoped
@@ -378,7 +390,10 @@ than trusting a hard threshold.
 
 ## Next
 
-Phase 3 is complete. Phase 4 (`agent/`) builds the LangGraph agent on `retrieve()`; the two
-findings above — an acknowledgements-aware `CHUNKER_VERSION = 3`, and a cross-encoder
-reranker justified by the `token-level-matching` class of miss — are the outstanding Phase 3
-work, both measurable against this eval set as it stands.
+Phase 3 is complete: ingest → chunk → embed → store → retrieve, with **recall@5 0.94** on 34
+hand-written queries. Phase 4 (`agent/`) builds the LangGraph agent on `retrieve()`.
+
+The one piece of Phase 3 work left on the table is a **cross-encoder reranker** over the top
+40 candidates, justified by the `token-level-matching` class of miss and measurable against
+this eval set unchanged. It is out of scope here for the reason given in the scope boundary:
+it changes the latency profile and puts a second model in the loop.

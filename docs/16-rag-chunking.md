@@ -1,6 +1,7 @@
 # Phase 3 · Step 2 — section-aware chunking + chunk metadata schema
 
-> Status: **done** — 2026-08-05. See *Results* for what the corpus measured and where the
+> Status: **done** — 2026-08-05; superseded twice, at `CHUNKER_VERSION = 2` (2026-08-18) and
+> `CHUNKER_VERSION = 3` (2026-08-19). See *Results* for what the corpus measured and where the
 > implementation departed from this design.
 > Predecessor: Step 1 — corpus acquisition + PDF extraction — **done**
 > ([15-rag-ingest-extraction.md](15-rag-ingest-extraction.md)). 43/43 papers extracted.
@@ -310,6 +311,55 @@ Two things changed in this file's contract as a result:
   chunks while every version number still matched.
 - `scripts/ingest_papers.py --chunk --exact-tokens` is how the corpus is built. Plain
   `--chunk` remains dependency-free and is what the tests exercise.
+
+### Superseded by chunker v3 (2026-08-19) — the contents page was eating the run
+
+Found by Step 4's retrieval eval, not by anything in this file
+([18-rag-retrieval.md](18-rag-retrieval.md) § Results): two of three eval misses were topped
+by chunks whose section was **Acknowledgements**, from papers unrelated to the question.
+`699 / 4148 chunks — 17% of the corpus, 25 papers` carried that section title, which is
+absurd for a paragraph of thanks. Two independent defects were behind it.
+
+**1. A contents page hijacks the monotonic run.** PaLM (2204.02311) has a table of contents,
+and its entries carry the paper's real section numbers in ascending order — `2 Model
+Architecture . . . 5`, `3 Training Infrastructure . . . 7`. The run gate consumed the run
+*there*, on page 2, so every real header later in the document was rejected as out-of-run
+and **2510 of 2595 lines** landed in the last contents entry, `Acknowledgments 51`. The gate
+was working exactly as designed; a contents page is simply a perfect adversarial input for
+it, and no amount of tuning the gate fixes that — the contents lines have to be gone before
+detection runs.
+
+Contents entries are now dropped up front, anchored on the one unambiguous signal: **dot
+leaders** (`. . . . 14`). Bare entries (`4 Results 4`) are dropped only when they sit
+adjacent to a leader line, because on their own they are indistinguishable from a table row
+— measured: a corpus-wide rule keyed on "short line ending in a number" swallowed the
+results tables of *Attention Is All You Need* and FlashAttention, and a ReAct transcript.
+
+**2. `REFERENCES_MIN_POSITION = 0.3` rejected three real References headers.** The floor is
+a fraction of the whole document, so a paper whose appendix is three times its body has its
+References line at 22–29% — below the floor, never cut, and the entire bibliography plus
+appendix fell into the section that preceded it (usually Acknowledgements). Measured across
+the corpus: every paper has exactly one `_REFERENCES` match, and none of them is a contents
+entry, because that regex anchors the whole line and `References . . . 89` cannot match it.
+The floor was defending against something that could not happen, so it drops to `0.05`.
+
+`CHUNKER_VERSION = 3`, corpus re-chunked with `--exact-tokens` and re-embedded:
+
+| Measure | v2 | v3 |
+|---|---|---|
+| Chunks | 4148 | **3656** (−12%) |
+| Acknowledgements-titled chunks | 699 (17%) | **98 (2.7%)** |
+| Papers on the `sections` path | 43 / 43 | 43 / 43 |
+| Chunks over 256 wordpieces | 0 | 0 |
+| Retrieval recall@5 (λ=0.7) | 0.91 | **0.94** |
+| Retrieval recall@3 (λ=0.7) | 0.88 | **0.91** |
+
+The 12% chunk drop is the bibliographies and contents pages that should never have been in
+the store. **The lesson worth keeping is where this was found:** two chunker bugs sat in a
+corpus that looked healthy on every statistic this file reports — 43/43 papers on the
+sections path, sensible chunk counts, no over-budget chunks — and only surfaced when
+something downstream measured whether the right paper came back. A structural metric cannot
+see a section boundary that is confidently in the wrong place.
 
 ### Where the implementation departed from the design
 

@@ -173,6 +173,50 @@ def test_references_and_everything_after_are_dropped():
     assert payload["dropped_chars"] > 0
 
 
+def test_a_contents_page_does_not_hijack_the_section_run():
+    """The defect docs/18 § Results found: a contents page carries the paper's real section
+    numbers in ascending order, so the monotonic run is consumed there and every real header
+    afterwards is rejected — the whole paper lands in the last contents entry."""
+    contents = (
+        "Contents\n"
+        "1 Introduction . . . . . . . . . . . . . . 1\n"
+        "2 Related Work . . . . . . . . . . . . . 2\n"
+        "3 Method . . . . . . . . . . . . . . . . 3\n"
+        "4 Results 4\n"  # the same block, dot leader lost in extraction
+        "5 Conclusion 5"
+    )
+    payload = chunk_document(make_document([contents] + sectioned_pages()))
+
+    assert payload["strategy"] == "sections"
+    sections = [chunk["section"] for chunk in payload["chunks"]]
+    assert "Method" in sections and "Conclusion" in sections
+    # No contents entry survived as text or as a section title.
+    body = " ".join(chunk["text"] for chunk in payload["chunks"])
+    assert ". . . ." not in body
+    assert not any(title.endswith(("1", "2", "3", "4", "5")) for title in sections)
+
+
+def test_a_lone_table_row_is_not_mistaken_for_a_contents_entry():
+    """`Transformer 7 7` is a results row. The weak contents shape is only trusted next to a
+    real dot-leader line, because on its own it is indistinguishable from a table."""
+    pages = sectioned_pages()
+    pages[1] += "\nTransformer 7 7\nLinformer 8 9\nbaseline comparison numbers above"
+    payload = chunk_document(make_document(pages))
+    body = " ".join(chunk["text"] for chunk in payload["chunks"])
+    assert "Transformer 7 7" in body
+
+
+def test_references_are_cut_even_when_the_appendix_dwarfs_the_body():
+    """The 0.3 position floor rejected the real References header on three corpus papers
+    whose appendix is three times the body (docs/18 § Results)."""
+    pages = sectioned_pages()
+    pages.append("References\n[1] A. Author. A cited paper nobody asked about. 2019.")
+    pages += [f"Appendix material {index}. {PARAGRAPH}" for index in range(8)]
+    payload = chunk_document(make_document(pages))
+    body = " ".join(chunk["text"] for chunk in payload["chunks"])
+    assert "cited paper nobody asked about" not in body
+
+
 def test_running_heads_page_numbers_and_stamps_are_dropped():
     head = "Preprint. Under review."
     pages = [f"{head}\narXiv:2501.01234v1 [cs.CL] 1 Jan 2025\n{PARAGRAPH}\n{number}" for number in range(1, 6)]

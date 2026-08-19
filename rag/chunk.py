@@ -13,7 +13,7 @@ The pipeline per paper:
     normalize   de-hyphenate, fold ligatures/dashes, collapse whitespace  (per page, keeps lines)
     strip junk  running heads/feet, page numbers, arXiv stamps
     detect      numbered headers gated on a monotonic run starting at 1
-    truncate    everything from References/Bibliography onward is dropped
+    truncate    contents entries are dropped, then everything from References onward
     split       paragraphs -> sentences -> ~200-token chunks with ~40 tokens of overlap
 
 Page provenance is carried per character from the source blocks all the way to the emitted
@@ -50,7 +50,7 @@ from .ingest import (
 #     6.9x at worst, putting 334 / 3489 chunks past MiniLM's 256-token window where they
 #     were silently truncated. The corpus is now chunked with the exact tokenizer injected
 #     (`--exact-tokens`); the heuristic remains the default, see `TokenCounter` below.
-CHUNKER_VERSION = 2
+CHUNKER_VERSION = 3
 
 # all-MiniLM-L6-v2 truncates at 256 wordpieces; 200 leaves headroom for the estimate
 # undercounting, and the overlap protects claims that straddle a boundary.
@@ -71,8 +71,28 @@ REPEATED_LINE_PAGE_FRACTION = 0.6
 REPEATED_LINE_MAX_CHARS = 80
 REPEATED_LINE_MIN_PAGES = 4
 
-# A `References` line before this point in the document is a table-of-contents entry.
-REFERENCES_MIN_POSITION = 0.3
+# A `References` line before this point in the document is assumed to be front matter. The
+# floor used to be 0.3, which was wrong: it is measured as a fraction of the *whole*
+# document, so a paper whose appendix is three times its body has its real References header
+# at 22-29% and never got cut — the bibliography then landed inside whatever section
+# preceded it (docs/18 § Results). The floor is not what rejects a table-of-contents entry
+# anyway: `_TOC_ENTRY` lines are dropped before this runs, and `_REFERENCES` anchors the
+# whole line, so `References . . . . 89` cannot match it. Keep a token floor only so a
+# first-page oddity cannot truncate an entire paper.
+REFERENCES_MIN_POSITION = 0.05
+
+# A contents / list-of-figures entry: a title, dot leaders, a page number. Never content,
+# and actively harmful — its numbers form an ascending run, so a contents page hijacks the
+# monotonic-run gate and every real header afterwards is rejected as out-of-run.
+TOC_MIN_LEADER_DOTS = 3
+# Contents pages mix leader lines with bare `Model Architecture 5` ones. The bare form is
+# far too close to a table row to key off on its own, so it is only ever dropped when it
+# sits next to a leader line — the strong signal anchors the block, the weak one extends it.
+TOC_MAX_GAP = 1
+TOC_WEAK_MAX_WORDS = 12
+TOC_MIN_TITLE_WORDS = 2
+# A single-word entry (`References . . . . . 89`) needs a longer leader to qualify.
+TOC_LONG_LEADER_DOTS = 4
 
 TokenCounter = Callable[[str], int]
 
@@ -279,6 +299,11 @@ _ABSTRACT = re.compile(r"^\s*(?:\d{1,2}\.?\s+)?abstract\s*[:.]?\s*$", re.IGNOREC
 _REFERENCES = re.compile(
     r"^\s*(?:\d{1,2}\.?\s+)?(references|bibliography|works cited)\s*[:.]?\s*$", re.IGNORECASE
 )
+_TOC_ENTRY = re.compile(
+    r"^\s{0,3}(?:[A-Z]|\d{1,2})?(?:\.\d+)*\.?\s*(?P<title>\S.{0,110}?)"
+    rf"(?P<leader>\.\s*(?:\.\s*){{{TOC_MIN_LEADER_DOTS - 1},}}\.?)\s*\d{{1,3}}\s*$"
+)
+_TOC_WEAK = re.compile(r"^\s{0,3}(?:[A-Z]|\d{1,2})?(?:\.\d+)*\.?\s*\S.{0,90}?\s\d{1,3}\s*$")
 _TAIL_HEADS = re.compile(
     r"^\s*(?:\d{1,2}\.?\s+)?(acknowledgements|acknowledgments|acknowledgement|acknowledgment|"
     r"appendix(?:\s+[A-Z0-9][^\s]*)?(?:\s*[:.]\s*.{0,60})?)\s*[:.]?\s*$",
@@ -323,6 +348,62 @@ def _is_numbered_header(text: str) -> tuple[int, bool, str] | None:
     if title.endswith((",", ";")):  # a wrapped sentence, not a head
         return None
     return int(number), bool(subs), title
+
+
+def _is_toc_entry(text: str) -> bool:
+    """`3 How to scale up model size . . . . . . . . 14` — a contents line, not a heading.
+
+    Two guards against eating a real table row: the dot leader must be a genuine run, and a
+    one-word title (`References . . . 89`) needs a longer leader than a multi-word one.
+    Measured: `-1 ... 1`, an axis label, is the only thing a looser rule caught on the
+    corpus, and it fails both.
+    """
+    text = text.strip()
+    match = _TOC_ENTRY.match(text)
+    if not match:
+        return False
+    if len(match.group("title").split()) >= TOC_MIN_TITLE_WORDS:
+        return True
+    return match.group("leader").count(".") >= TOC_LONG_LEADER_DOTS
+
+
+def _is_weak_toc_entry(text: str) -> bool:
+    """`Model Architecture 5` — a contents entry with the dot leader lost in extraction.
+    Only ever trusted adjacent to a real leader line; alone it is indistinguishable from a
+    table row, which is exactly the mistake this shape invites."""
+    text = text.strip()
+    if not text or len(text.split()) > TOC_WEAK_MAX_WORDS:
+        return False
+    return bool(_TOC_WEAK.match(text))
+
+
+def _cut_toc_entries(lines: list[Line]) -> tuple[list[Line], int]:
+    """Drop contents / list-of-figures blocks.
+
+    A contents page is poison for `detect_sections`: its entries carry the paper's real
+    section numbers in ascending order, so the monotonic-run gate consumes the run on the
+    contents page and then rejects every real header as out-of-run. The whole paper ends up
+    inside the last contents entry — measured at 2510 of 2595 lines on PaLM
+    (docs/18 § Results).
+    """
+    strong = [index for index, line in enumerate(lines) if _is_toc_entry(line.text)]
+    if not strong:
+        return lines, 0
+
+    drop = set(strong)
+    for seed in strong:
+        for step in (-1, 1):  # grow the block outward from the anchor
+            index, gap = seed + step, 0
+            while 0 <= index < len(lines) and gap <= TOC_MAX_GAP:
+                if _is_weak_toc_entry(lines[index].text):
+                    drop.add(index)
+                    gap = 0
+                else:
+                    gap += 1
+                index += step
+
+    kept = [line for index, line in enumerate(lines) if index not in drop]
+    return kept, sum(len(lines[index].text) for index in drop)
 
 
 def _cut_references(lines: list[Line]) -> tuple[list[Line], int]:
@@ -589,8 +670,11 @@ def chunk_document(
 
     page_count = int(document.get("page_count") or 0)
     lines, dropped = _strip_junk(_document_lines(document), page_count)
+    # Contents entries go first: they must not be visible to either the References cut or
+    # the monotonic-run gate.
+    lines, dropped_toc = _cut_toc_entries(lines)
     lines, dropped_refs = _cut_references(lines)
-    dropped += dropped_refs
+    dropped += dropped_toc + dropped_refs
 
     sections, accepted = detect_sections(lines)
     strategy = "sections" if sections else "fixed"
