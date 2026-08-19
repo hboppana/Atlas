@@ -25,7 +25,7 @@ broadens freely once retrieval is validated.
 | Chunk | `chunk.py` | **done** (Step 2, docs/16) — **section-aware** chunking over the extracted JSON: normalize (de-hyphenate + rejoin), numbered-header detection gated on a monotonic run, drop the bibliography, ~200-token windows with overlap → `data/chunks/<paper_id>.json`. Measured at `CHUNKER_VERSION = 2`: 43/43 papers `sections`, **4148 chunks**, max 200 true wordpieces |
 | Embed | `embed.py` | **done** (Step 3, docs/17) — `all-MiniLM-L6-v2` pinned by revision, L2-normalized fp32 vectors cached to `data/embeddings/<paper_id>.npz`, plus from-scratch numpy k-means + silhouette + term-statistic labels → `data/topics.json` |
 | Store | `store.py` | **done** (Step 3, docs/17) — `ChunkStore` over a ChromaDB `PersistentClient` at `data/chroma/`; delete-by-paper then add, scalars-only metadata, explicit vectors on every call |
-| Retrieve | `retrieve.py` | semantic retrieval + reranking — top-k chunks with **MMR** (maximal marginal relevance) for diversity |
+| Retrieve | `retrieve.py` | **done** (Step 4, docs/18) — `retrieve()`: HNSW top-40 candidates (filters pushed into the Chroma `where`), then exact **MMR** in numpy at `DEFAULT_LAMBDA = 0.7` with a relaxing 2-chunk-per-paper cap, returning frozen `Result` rows. Measured on `rag/eval/queries.json` (34 queries + 2 probes): **recall@5 0.91, MRR 0.79, 3.9 distinct papers** |
 
 - `scripts/ingest_papers.py --fetch [ids.txt] --ingest --chunk [--exact-tokens] --embed
   [--device D] --query TEXT [-k N] --report [--force] [--data-dir D]` drives the whole
@@ -47,11 +47,15 @@ broadens freely once retrieval is validated.
   `rag/tests/fixtures/make_fixtures.py`; no test needs the corpus or the network. Step 3's
   heavy deps are quarantined the same way: everything but "call the model" runs against
   `conftest.StubEmbedder` (SHA-256 → unit vector), and the real-model tests are
-  `importorskip`-guarded. `pytest rag/tests` = **93 passed**.
+  `importorskip`-guarded. `pytest rag/tests` = **120 passed**.
 - Embeddings can be generated on the lab box's A6000 GPUs for the full corpus (pin a card
   with `CUDA_VISIBLE_DEVICES` since it is shared).
-- `requirements.txt`: `pypdf` is uncommented (Step 1); `chromadb` and
-  `sentence-transformers` land with Steps 3–4.
+- `requirements.txt`: `pypdf` (Step 1), `chromadb` + `sentence-transformers` (Step 3). Step 4
+  added **no** dependency: MMR and the metrics are numpy and arithmetic.
+- **Known defect, measured not fixed:** Step 2's section detector attributes everything after
+  an Acknowledgements header to that section — 699/4148 chunks (17%, 25 papers). Excluding
+  them lifts recall@5 from 0.91 to 0.94. The fix is a `CHUNKER_VERSION = 3` that treats
+  acknowledgements as terminal like the bibliography, plus a re-chunk and re-embed.
 
 ## Conventions
 

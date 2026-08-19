@@ -10,7 +10,10 @@
     scripts/ingest_papers.py --fetch --ingest --chunk --embed   # the pipeline, in order
     scripts/ingest_papers.py --report                # counts, chunk/embed stats + failures
     scripts/ingest_papers.py --embed --force         # re-embed everything
-    scripts/ingest_papers.py --query "flash attention tiling" -k 5
+    scripts/ingest_papers.py --query "flash attention tiling" -k 5      # store smoke path
+    scripts/ingest_papers.py --search "how is the kv cache paged" -k 5  # the real retriever
+    scripts/ingest_papers.py --search "..." --topic quantization --year-min 2023
+    scripts/ingest_papers.py --eval                  # recall@k over rag/eval/queries.json
 
 One CLI, one manifest, one report. Each phase is a separate status transition, so their
 failures stay isolated; each is idempotent, so re-running is a no-op and a crash costs at
@@ -73,7 +76,44 @@ def main(argv: list[str] | None = None) -> int:
         metavar="TEXT",
         help="smoke query: plain top-k cosine over the store (MMR/reranking are Step 4)",
     )
-    parser.add_argument("-k", "--top-k", type=int, default=5, help="results for --query (default: 5)")
+    parser.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="retrieve: top-k cosine then MMR for diversity, with optional filters (Step 4)",
+    )
+    # These four default to None rather than to `rag.retrieve`'s constants so that importing
+    # numpy is deferred to a run that actually retrieves — `--report` stays dependency-free.
+    parser.add_argument(
+        "-k", "--top-k", type=int, default=5, help="results for --query/--search (default: 5)"
+    )
+    parser.add_argument(
+        "--fetch-k",
+        type=int,
+        help="candidates pulled before MMR selects among them (default: 40)",
+    )
+    parser.add_argument(
+        "--lambda",
+        dest="lambda_mult",
+        type=float,
+        help="MMR relevance/diversity trade-off, 1.0 = plain top-k (default: 0.7)",
+    )
+    parser.add_argument(
+        "--max-per-paper",
+        type=int,
+        help="cap on chunks from one paper, 0 disables (default: 2)",
+    )
+    parser.add_argument("--topic", help="filter by a derived topic label (see --report)")
+    parser.add_argument(
+        "--paper", action="append", metavar="ID", help="filter to a paper_id (repeatable)"
+    )
+    parser.add_argument("--section", help="filter to one section title, e.g. Method")
+    parser.add_argument("--year-min", type=int, help="filter to papers published in or after YEAR")
+    parser.add_argument("--year-max", type=int, help="filter to papers published in or before YEAR")
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="run rag/eval/queries.json and print recall@k, MRR and the miss list",
+    )
     parser.add_argument(
         "--device",
         help="torch device for the encoder (default: cuda when available, else cpu)",
@@ -95,9 +135,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     stages = (args.fetch, args.ingest, args.chunk, args.embed)
-    if not (any(stages) or args.report or args.query):
+    if not (any(stages) or args.report or args.query or args.search or args.eval):
         parser.error(
-            "nothing to do: pass --fetch, --ingest, --chunk, --embed, --query and/or --report"
+            "nothing to do: pass --fetch, --ingest, --chunk, --embed, --query, --search, "
+            "--eval and/or --report"
         )
 
     paths = Paths(data_dir=args.data_dir.expanduser().resolve())
@@ -147,6 +188,37 @@ def main(argv: list[str] | None = None) -> int:
                     f"[{metadata.get('section') or 'n/a'}]  {metadata.get('title') or ''}"
                 )
                 print(f"       {' '.join(hit['text'].split())[:200]}")
+        if args.search:
+            from rag.retrieve import DEFAULT_FETCH_K, DEFAULT_LAMBDA, MAX_PER_PAPER
+            from rag.retrieve import format_results, retrieve
+
+            results = retrieve(
+                paths,
+                args.search,
+                k=args.top_k,
+                fetch_k=DEFAULT_FETCH_K if args.fetch_k is None else args.fetch_k,
+                lambda_mult=DEFAULT_LAMBDA if args.lambda_mult is None else args.lambda_mult,
+                max_per_paper=(
+                    MAX_PER_PAPER if args.max_per_paper is None else args.max_per_paper
+                ),
+                paper_id=args.paper,
+                topic_label=args.topic,
+                year_min=args.year_min,
+                year_max=args.year_max,
+                section=args.section,
+                device=args.device,
+            )
+            print(format_results(args.search, results))
+        if args.eval:
+            from rag.eval import format_report, run_eval
+            from rag.retrieve import DEFAULT_LAMBDA
+
+            chosen = DEFAULT_LAMBDA if args.lambda_mult is None else args.lambda_mult
+            # Both settings, always: MMR's cost in recall is measured, never assumed.
+            for lambda_mult, label in ((1.0, "lambda=1.0 (plain top-k)"), (chosen, f"lambda={chosen}")):
+                data = run_eval(paths, k=args.top_k, lambda_mult=lambda_mult, device=args.device)
+                print()
+                print(format_report(data, label=label))
         if args.report or any(stages):
             print()
             print(report(paths))

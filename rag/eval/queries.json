@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "corpus": "scripts/arxiv_ids.txt (43 papers)",
+  "note": "Hand-built, judged by reading the papers, frozen once measured. Queries are phrased the way someone who has NOT read the paper would ask; none reuses a title or an abstract sentence, because that measures string overlap surviving an encoder rather than retrieval. An entry with an empty expected_papers is a near-miss probe: in-domain, answered by no paper in the corpus, scored separately so it reports whether a low top score is a usable 'I don't know' signal for Phase 4.",
+  "queries": [
+    {
+      "query_id": "self-attention",
+      "query": "how can a model work out which words in a sentence relate to each other without processing them one at a time",
+      "expected_papers": ["1706.03762"]
+    },
+    {
+      "query_id": "bidirectional-pretraining",
+      "query": "pretraining objective that lets the model use both left and right context at once instead of predicting the next word",
+      "expected_papers": ["1810.04805"]
+    },
+    {
+      "query_id": "sampling-repetition",
+      "query": "why does maximisation-based decoding produce bland repetitive text and what sampling scheme avoids it",
+      "expected_papers": ["1904.09751"]
+    },
+    {
+      "query_id": "sentence-vectors",
+      "query": "getting one fixed length vector per sentence so pairs can be compared with cosine similarity cheaply",
+      "expected_papers": ["1908.10084", "2212.03533", "2309.07597"],
+      "note": "three papers train sentence/text encoders; any is a correct answer"
+    },
+    {
+      "query_id": "norm-without-mean",
+      "query": "normalisation layer that skips re-centering and only rescales, to save compute",
+      "expected_papers": ["1910.07467"]
+    },
+    {
+      "query_id": "shared-kv-heads",
+      "query": "letting several query heads share a single key and value head so decoding reads less memory",
+      "expected_papers": ["1911.02150", "2305.13245"]
+    },
+    {
+      "query_id": "loss-vs-size",
+      "query": "is there a predictable curve relating model size, dataset size and final loss",
+      "expected_papers": ["2001.08361", "2203.15556"]
+    },
+    {
+      "query_id": "gated-ffn",
+      "query": "gated activation in the feed forward block instead of a plain relu",
+      "expected_papers": ["2002.05202"]
+    },
+    {
+      "query_id": "retrieval-in-pretraining",
+      "query": "putting a retriever inside pretraining so factual knowledge lives in an index rather than in the weights",
+      "expected_papers": ["2002.08909", "2112.04426", "2208.03299"]
+    },
+    {
+      "query_id": "learned-retriever",
+      "query": "training a two tower encoder to find answer bearing passages better than bm25 keyword matching",
+      "expected_papers": ["2004.04906"]
+    },
+    {
+      "query_id": "token-level-matching",
+      "query": "keeping a vector per token instead of one per passage and scoring matches late",
+      "expected_papers": ["2004.12832"]
+    },
+    {
+      "query_id": "generator-plus-index",
+      "query": "combining a generative model with a non parametric document index for knowledge heavy tasks",
+      "expected_papers": ["2005.11401", "2002.08909", "2208.03299"]
+    },
+    {
+      "query_id": "in-context-examples",
+      "query": "solving a new task by putting a few examples in the prompt instead of updating any weights",
+      "expected_papers": ["2005.14165"]
+    },
+    {
+      "query_id": "fuse-many-passages",
+      "query": "encoding each retrieved passage separately and only combining them in the decoder so many can be used",
+      "expected_papers": ["2007.01282"]
+    },
+    {
+      "query_id": "rotary-position",
+      "query": "encoding where a token sits by rotating its query and key vectors rather than adding a position embedding",
+      "expected_papers": ["2104.09864"]
+    },
+    {
+      "query_id": "low-rank-adapters",
+      "query": "adapting a large model by training small extra matrices while the original weights stay frozen",
+      "expected_papers": ["2106.09685", "2305.14314"]
+    },
+    {
+      "query_id": "unsupervised-retriever",
+      "query": "training a dense retriever without any labelled query passage pairs",
+      "expected_papers": ["2112.09118"]
+    },
+    {
+      "query_id": "intermediate-steps",
+      "query": "asking the model to write out its working improves arithmetic and multi step questions",
+      "expected_papers": ["2201.11903", "2205.11916"]
+    },
+    {
+      "query_id": "human-preferences",
+      "query": "using human preference comparisons and a reward model to make a model follow instructions",
+      "expected_papers": ["2203.02155", "2307.09288"]
+    },
+    {
+      "query_id": "compute-budget-split",
+      "query": "given a fixed training compute budget how should it be divided between parameters and training tokens",
+      "expected_papers": ["2203.15556", "2001.08361"]
+    },
+    {
+      "query_id": "tiled-attention",
+      "query": "computing exact attention without ever writing the full score matrix to gpu memory",
+      "expected_papers": ["2205.14135", "2307.08691"]
+    },
+    {
+      "query_id": "outlier-features",
+      "query": "a few extreme activation channels break naive eight bit matrix multiplication at scale",
+      "expected_papers": ["2208.07339"]
+    },
+    {
+      "query_id": "reason-and-act",
+      "query": "interleaving the model's reasoning with calls out to an external tool or environment",
+      "expected_papers": ["2210.03629"]
+    },
+    {
+      "query_id": "four-bit-weights",
+      "query": "compressing weights to four bits after training without any retraining pass",
+      "expected_papers": ["2210.17323", "2306.00978"]
+    },
+    {
+      "query_id": "serving-partitioning",
+      "query": "how to split a very large model across accelerators to serve it with low latency",
+      "expected_papers": ["2211.05102"]
+    },
+    {
+      "query_id": "fake-document-embedding",
+      "query": "let the model write a hypothetical answer first and embed that instead of the raw question",
+      "expected_papers": ["2212.10496"]
+    },
+    {
+      "query_id": "activation-aware-quant",
+      "query": "deciding which weight channels to protect during quantisation by looking at activation magnitude",
+      "expected_papers": ["2306.00978"]
+    },
+    {
+      "query_id": "middle-of-context",
+      "query": "evidence placed halfway through a long input gets used much less than evidence at the ends",
+      "expected_papers": ["2307.03172"]
+    },
+    {
+      "query_id": "kv-cache-memory",
+      "query": "the key value cache wastes memory through fragmentation while serving many concurrent requests",
+      "expected_papers": ["2309.06180"]
+    },
+    {
+      "query_id": "finetune-quantised",
+      "query": "finetuning on a single gpu by keeping the base weights in four bits during training",
+      "expected_papers": ["2305.14314"]
+    },
+    {
+      "query_id": "when-to-retrieve",
+      "query": "letting the model decide for itself whether it needs to look something up and criticise its own draft",
+      "expected_papers": ["2310.11511"]
+    },
+    {
+      "query_id": "summary-tree",
+      "query": "building a hierarchy of recursive summaries over a document so retrieval can work at several levels of abstraction",
+      "expected_papers": ["2401.18059"]
+    },
+    {
+      "query_id": "open-weights-model",
+      "query": "training a competitive foundation model using only publicly available data and releasing the weights",
+      "expected_papers": ["2302.13971", "2307.09288", "2310.06825"]
+    },
+    {
+      "query_id": "sliding-window-attention",
+      "query": "restricting each token to attend to a fixed window of recent tokens to handle long sequences cheaply",
+      "expected_papers": ["2310.06825"]
+    },
+    {
+      "query_id": "mmr-diversity",
+      "query": "how do you pick search results that are relevant but not near duplicates of one another",
+      "expected_papers": [],
+      "note": "probe: MMR is Step 4's own algorithm, no paper in the corpus covers it"
+    },
+    {
+      "query_id": "ann-graph-index",
+      "query": "how does a navigable small world graph index find approximate nearest neighbours",
+      "expected_papers": [],
+      "note": "probe: in-domain, but the corpus has no ANN-index paper"
+    }
+  ]
+}

@@ -182,21 +182,41 @@ class ChunkStore:
 
     # -- query ---------------------------------------------------------------------------
 
-    def query(self, vector: np.ndarray, *, k: int = 5, where: dict | None = None) -> list[dict]:
-        """Plain top-k cosine over an explicit query vector. Step 4 layers MMR on top of the
-        cached matrix; this is the smoke path that proves the store is wired correctly."""
+    def query(
+        self,
+        vector: np.ndarray,
+        *,
+        k: int = 5,
+        where: dict | None = None,
+        include_vectors: bool = False,
+    ) -> list[dict]:
+        """Plain top-k cosine over an explicit query vector — the ranking Chroma itself
+        produces, and the smoke path that proves the store is wired correctly.
+
+        `include_vectors` asks Chroma for the stored rows as well, which is what
+        `rag.retrieve` needs for its chunk-to-chunk similarities. Reading those vectors back
+        from here rather than from the `.npz` cache keeps the searched rows and the
+        diversified rows the same rows — the cache is for work that must not re-run the
+        model, not for the hot path.
+        """
         vector = np.asarray(vector, dtype=np.float32).reshape(-1)
+        include = ["documents", "metadatas", "distances"]
+        if include_vectors:
+            include.append("embeddings")
         rows = self.collection.query(
             query_embeddings=[vector.tolist()],
             n_results=max(1, int(k)),
             where=where or None,
-            include=["documents", "metadatas", "distances"],
+            include=include,
         )
         ids = (rows.get("ids") or [[]])[0]
         documents = (rows.get("documents") or [[]])[0]
         metadatas = (rows.get("metadatas") or [[]])[0]
         distances = (rows.get("distances") or [[]])[0]
-        return [
+        # Chroma returns `embeddings: None` (not an empty list) when it was not requested.
+        embeddings = (rows.get("embeddings") if include_vectors else None) or [[]]
+        embeddings = embeddings[0] if len(embeddings) else []
+        hits = [
             {
                 "chunk_id": ids[index],
                 "text": documents[index] if index < len(documents) else "",
@@ -206,6 +226,11 @@ class ChunkStore:
             }
             for index in range(len(ids))
         ]
+        if include_vectors:
+            for index, hit in enumerate(hits):
+                row = embeddings[index] if index < len(embeddings) else None
+                hit["vector"] = np.asarray(row, dtype=np.float32) if row is not None else None
+        return hits
 
     def reset(self) -> None:
         """Drop the collection. Used by tests and by a metadata-schema change."""

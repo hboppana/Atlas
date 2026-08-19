@@ -1,6 +1,6 @@
 # Phase 3 · Step 4 — MMR retrieval + a retrieval eval set
 
-> Status: **designed** — 2026-08-19. Not yet implemented.
+> Status: **done** — designed and implemented 2026-08-19. See *Results* below.
 > Predecessor: Step 3 — local embeddings + ChromaDB store + derived topics — **done**
 > ([17-rag-embeddings-store.md](17-rag-embeddings-store.md)). 43/43 papers `embedded`,
 > 4148 chunks in `atlas_chunks`, k=2 derived topics.
@@ -56,7 +56,7 @@ policy?", and two flags answer it without a debugger.
 ```python
 DEFAULT_K          = 5      # what the caller gets back
 DEFAULT_FETCH_K    = 40     # candidates pulled before MMR selects from them
-DEFAULT_LAMBDA     = 0.6    # 1.0 = pure relevance, 0.0 = pure diversity
+DEFAULT_LAMBDA     = 0.7    # 1.0 = pure relevance, 0.0 = pure diversity; measured, see Results
 MAX_PER_PAPER      = 2      # cap on chunks from any one paper (0 = no cap)
 ```
 
@@ -129,7 +129,11 @@ label is an error naming the available ones, never a silent empty result.
 MMR diversifies in vector space, which is *not* the same as diversifying across papers — a
 paper with 200 chunks can still take 4 of 5 slots with genuinely different passages.
 `MAX_PER_PAPER = 2` is applied inside the greedy loop (a candidate whose paper is full is
-skipped), not as a post-filter, so the selection still fills `k`. It is a separate knob from
+skipped), not as a post-filter, so the selection still fills `k`. And the cap is a
+**preference, not a quota**: if every remaining candidate belongs to a paper that has filled
+it — which happens on a narrow question the corpus answers in two papers — the cap is
+dropped for the remaining slots rather than returning fewer than `k`. Under-filling `k` is
+the exact failure post-filtering causes, and a cap that quietly did it would be no better. It is a separate knob from
 λ because they solve different problems, and Phase 4's "cite sources" reads much better with
 three papers than with one.
 
@@ -160,7 +164,7 @@ Phase 4 formats citations off these fields, and a typo in a dict key should be a
 ## Eval set
 
 `rag/eval/queries.json` — hand-built, versioned in git, **the deliverable of this step**.
-~25 queries over the 43-paper corpus:
+36 entries over the 43-paper corpus (34 scored + 2 near-miss probes):
 
 ```jsonc
 {
@@ -218,7 +222,8 @@ MMR tests need neither).
   outlier picks the outlier second; selection is deterministic across runs; `k > n_candidates`
   returns everything without raising; `fetch_k <= k` degrades to top-k.
 - **Per-paper cap.** A candidate set of 10 chunks from one paper and 2 from another returns
-  at most `MAX_PER_PAPER` from the first and still fills `k`.
+  at most `MAX_PER_PAPER` from the first and still fills `k`; a candidate set drawn entirely
+  from one paper relaxes the cap rather than returning fewer than `k`.
 - **Filter translation.** Each argument produces the expected `where` clause; combinations
   nest under `$and`; an unknown `topic_label` raises naming the known labels; filters are in
   the *fetch* call, asserted by a store double that records its arguments.
@@ -251,12 +256,12 @@ argument that kept `scikit-learn` out of Step 3's k-means.
 
 ## Done when
 
-- `pytest rag/tests` green (Step 1–3's 93 plus the new ones) on a checkout with no ML deps.
+- `pytest rag/tests` green (Step 1–3's 93 plus the new ones) on a checkout with no ML deps. ✅ 120
 - `--search` returns 5 results in the documented shape, and λ=1.0 reproduces `--query`.
 - `--eval` runs the full set and prints recall@1/3/5, MRR, distinct-papers and the miss list,
   at both λ=1.0 and the default, with both pasted into *Results*.
-- recall@5 ≥ 0.85 at the default λ, or the shortfall is explained here rather than tuned away.
-- `queries.json` has ≥20 queries, every `expected_papers` ID in the corpus.
+- recall@5 ≥ 0.85 at the default λ, or the shortfall is explained here rather than tuned away. ✅ 0.91
+- `queries.json` has ≥20 queries, every `expected_papers` ID in the corpus. ✅ 36 entries
 - Phase 1 / Phase 2 suites stay green.
 
 ## Design decisions
@@ -277,7 +282,103 @@ argument that kept `scikit-learn` out of Step 3's k-means.
   which is not the thing under test. 25 honest queries beat 500 circular ones.
 - **The eval set is frozen once measured**, and lives in git next to the code it grades.
 
-## Results
+## Results (2026-08-19)
 
-_To be filled in when implemented — measured recall at both λ settings, what the miss list
-turned out to be, and anything that did not survive contact with the corpus._
+`pytest rag/tests` — **120 passed** (Steps 1–3's 93 plus 27 new), CPU, no GPU needed.
+
+### The λ sweep, and an honest note about it
+
+`--eval` over the real store, 34 scored queries + 2 probes, k=5, per-paper cap 2:
+
+| λ | recall@1 | recall@3 | recall@5 | MRR | distinct papers |
+|---|---|---|---|---|---|
+| 1.0 (plain top-k) | 0.71 | 0.82 | 0.91 | 0.78 | 3.6 |
+| 0.9 | 0.71 | 0.82 | **0.94** | 0.79 | 3.9 |
+| 0.8 | 0.71 | 0.85 | 0.91 | 0.79 | 3.8 |
+| **0.7 (shipped)** | 0.71 | **0.88** | 0.91 | **0.79** | 3.9 |
+| 0.6 (originally proposed) | 0.71 | 0.85 | 0.85 | 0.76 | 4.0 |
+| 0.5 | 0.71 | 0.82 | 0.85 | 0.76 | 4.1 |
+| 0.3 | 0.71 | 0.82 | 0.85 | 0.76 | 4.2 |
+
+The design proposed λ = 0.6 as a guess, and it was **wrong**: it costs 6 points of recall@5
+and 2 points of MRR to buy 0.4 of a paper. λ = 0.7 dominates plain top-k outright — same
+recall@5, better recall@3 and MRR, and 3.6 → 3.9 distinct papers — so the default changed
+here, exactly as the design said it would if the drop was material.
+
+**The 0.7 is fitted to this eval set, not held out from it.** Nothing was tuned except this
+one scalar, and the set was not edited after being measured — but a number chosen on the set
+it is scored against is worth less than the table makes it look, and the honest reading is
+"0.7 is not worse than top-k on 34 queries", not "0.7 generalises". recall@1 is identical at
+every λ, which is the expected sanity check: MMR cannot change the first pick.
+
+### Acknowledgements sections are eating the corpus
+
+The three λ=0.7 misses are `self-attention`, `token-level-matching`, `serving-partitioning`,
+and looking at what came back instead is the most useful thing this eval produced. Two of
+the three are topped by chunks whose section is **Acknowledgements** — from papers that have
+nothing to do with the question.
+
+`699 / 4148 chunks (17% of the corpus, 25 papers)` carry an acknowledgements section title.
+That is far too many for actual acknowledgements text: Step 2's section detector accepts the
+Acknowledgements header and then attributes **everything after it** — appendices, extra
+results, sometimes a good chunk of the paper — to that section, because no later header
+continues the monotonic run. So the label is wrong on a sixth of the corpus, and the
+generic-prose passages inside it are exactly the kind of text MiniLM finds mildly similar to
+every question.
+
+Re-running the eval with those chunks excluded, everything else identical:
+
+```
+lambda=0.7, acknowledgement sections excluded   (34 queries, 2 probes, k=5)
+  recall@1  0.71   recall@3  0.88   recall@5  0.94
+  mrr       0.80   distinct papers per query  3.9
+  misses: 2  (self-attention, token-level-matching)
+```
+
+**recall@5 0.91 → 0.94 for free.** This is a Step 2 defect with a Step 4 symptom, and the
+fix is a `CHUNKER_VERSION` bump that treats acknowledgements as a terminal section the way
+the bibliography already is, then a re-chunk and re-embed of the corpus. It is deliberately
+*not* done here: it changes 17% of the chunks, which would invalidate the numbers above, and
+Step 4 does not get to quietly re-chunk the corpus while claiming a retrieval improvement.
+Filtering it at query time was also rejected — it would hide a data bug inside a policy.
+
+### The remaining two misses are the encoder, not the pipeline
+
+- `self-attention` ("how can a model work out which words in a sentence relate to each other
+  without processing them one at a time") does not retrieve *Attention Is All You Need*. The
+  paper never phrases the mechanism that way; the query is a description of the idea and the
+  paper is a description of an architecture. This is the query set doing its job — it was
+  written deliberately without reusing the title, and a bi-encoder with a 384-d MiniLM is
+  what a paraphrase gap looks like.
+- `token-level-matching` (ColBERT) surfaces DPR and BERT instead — semantically adjacent
+  papers on the same task. A cross-encoder rerank over the top 40 is the obvious fix, and it
+  is out of scope by design. **This is the measurement that would justify adding one.**
+
+### Probes behave as hoped
+
+Both near-miss probes — MMR itself, and graph-based ANN indexes, neither in the corpus —
+top out at **0.50** and **0.42**, against 0.67 for a well-answered question. The gap is
+usable but not wide, so Phase 4 should treat a top score under ~0.5 as weak evidence rather
+than trusting a hard threshold.
+
+### Small things that changed under contact
+
+- **The per-paper cap under-filled `k`.** The first real `--search` returned 4 results for
+  "how is the kv cache paged during serving": only two papers cover it, cap 2, so the greedy
+  loop ran out of legal candidates. Fixed by relaxing the cap once it blocks every remaining
+  candidate — and the `for _ in range(k)` loop became a `while len(selected) < k` so that
+  relaxing re-picks the slot it failed on instead of consuming it.
+- **`ChunkStore.query` grew `include_vectors`.** Chroma does not return stored embeddings
+  unless asked, and returns `None` rather than an empty list when not asked. The smoke path
+  stays cheap; only retrieval pays for the vectors.
+- **The CLI defers `import numpy`.** `--fetch-k` / `--lambda` / `--max-per-paper` default to
+  `None` at the argparse layer and resolve to `rag.retrieve`'s constants at call time, so
+  `--report` still runs on a checkout with no ML deps — the Step 3 rule, which a top-level
+  `from rag.retrieve import DEFAULT_K` had quietly broken.
+
+## Next
+
+Phase 3 is complete. Phase 4 (`agent/`) builds the LangGraph agent on `retrieve()`; the two
+findings above — an acknowledgements-aware `CHUNKER_VERSION = 3`, and a cross-encoder
+reranker justified by the `token-level-matching` class of miss — are the outstanding Phase 3
+work, both measurable against this eval set as it stands.
