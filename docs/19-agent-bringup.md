@@ -4,7 +4,8 @@
 > Predecessor: Phase 3 Step 4 — MMR retrieval + eval set — **done**
 > ([18-rag-retrieval.md](18-rag-retrieval.md)). recall@5 **0.94** on 36 queries, 43 papers,
 > 4148 chunks in Chroma.
-> Successor: Step 2 — `evaluate_relevance` + the conditional loop-back edge.
+> Successor: Step 2 — `evaluate_relevance` + the conditional edge
+> ([20-agent-relevance-loop.md](20-agent-relevance-loop.md)).
 
 ## Goal
 
