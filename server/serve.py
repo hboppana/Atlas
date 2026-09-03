@@ -1,4 +1,4 @@
-"""FastAPI server — POST /generate (SSE streaming) and GET /health.
+"""FastAPI server — POST /generate (SSE streaming), POST /tokenize and GET /health.
 
 docs/14-bridge-serving.md. This module owns HTTP concerns only; all inference goes through
 server.bridge.Engine, which goes through the C++/CUDA engine.
@@ -25,6 +25,10 @@ from .bridge import Done, Engine, EngineError, TokenEvent
 from .config import Config
 
 log = logging.getLogger("atlas.serve")
+
+
+class TokenizeRequest(BaseModel):
+    text: str = Field(min_length=1, description="Raw text to count; no chat template is applied.")
 
 
 class GenerateRequest(BaseModel):
@@ -79,6 +83,21 @@ async def health(request: Request) -> dict:
         "model_loaded": engine is not None,
         "max_new_tokens": request.app.state.config.max_new_tokens,
     }
+
+
+@app.post("/tokenize")
+async def tokenize(request: Request, body: TokenizeRequest) -> dict:
+    """Token count from the tokenizer that will actually do the encoding.
+
+    Phase 4's agent budgets its prompt against a 2048-token window with no KV cache, so the
+    count has to be real: docs/17 measured what a word-count heuristic costs (334/3489 chunks
+    silently over the window, and a re-chunk to fix it). The tokenizer is already loaded
+    here; asking it is cheaper than guessing anywhere else.
+    """
+    engine: Engine | None = getattr(request.app.state, "engine", None)
+    if engine is None:
+        raise HTTPException(status_code=503, detail="engine not loaded")
+    return {"n_tokens": len(engine.encode(body.text))}
 
 
 def _checked(request: Request, body: GenerateRequest) -> Engine:

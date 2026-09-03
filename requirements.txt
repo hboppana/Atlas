@@ -24,9 +24,11 @@ pypdf>=4.2
 chromadb>=0.5
 sentence-transformers>=3.0
 
-# --- Phase 4: agent (added later) ---
-# langchain
-# langgraph
+# --- Phase 4: agent (docs/19-agent-bringup.md) ---
+# Step 1 needs langgraph only (StateGraph); the agent talks to the Phase 2 server over
+# httpx, already pinned above, and never to a hosted LLM. langchain lands when a step
+# actually uses it.
+langgraph>=0.2
 
 # --- Phase 5: MCP (added later) ---
 # mcp

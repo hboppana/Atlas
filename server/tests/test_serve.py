@@ -1,6 +1,7 @@
 """FastAPI endpoint validation — docs/14-bridge-serving.md.
 
-The HTTP layer only: that /generate streams rather than buffers, that the streamed text
+The HTTP layer only: that /generate streams rather than buffers, that /tokenize agrees
+with the engine's own encoder, that the streamed text
 equals the batch text equals the bridge's, and that validation and disconnect behave.
 Engine correctness is test_bridge.py's job.
 """
@@ -14,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from server.config import Config
 from server.serve import app
-from server.tests.conftest import ORACLE_IDS, ORACLE_TEXT, PROMPT
+from server.tests.conftest import ORACLE_IDS, ORACLE_TEXT, PROMPT, PROMPT_IDS
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +90,20 @@ def test_disconnect_stops_generation(client, engine) -> None:
         for _ in zip(range(2), r.iter_lines()):
             pass
     assert engine.generate(PROMPT, 1).ids == ORACLE_IDS[:1]
+
+
+def test_tokenize_matches_the_engines_own_encoder(client, engine) -> None:
+    """Phase 4 budgets its prompt against this number, so it must be the tokenizer's own.
+
+    docs/17 measured what a heuristic count costs (334/3489 chunks silently over the
+    window); the agent asks the thing that will actually do the encoding.
+    """
+    body = client.post("/tokenize", json={"text": PROMPT}).json()
+    assert body["n_tokens"] == len(PROMPT_IDS) == len(engine.encode(PROMPT))
+
+
+def test_tokenize_rejects_empty_text(client) -> None:
+    assert client.post("/tokenize", json={"text": ""}).status_code == 422
 
 
 @pytest.mark.parametrize(

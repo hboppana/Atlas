@@ -1,6 +1,6 @@
 # Phase 4 · Step 1 — `agent/` bring-up: state contract, engine client, `retrieve → synthesize`
 
-> Status: **designed 2026-08-24** — not yet implemented.
+> Status: **done** — designed 2026-08-24, implemented 2026-09-03. See *Results* below.
 > Predecessor: Phase 3 Step 4 — MMR retrieval + eval set — **done**
 > ([18-rag-retrieval.md](18-rag-retrieval.md)). recall@5 **0.94** on 36 queries, 43 papers,
 > 4148 chunks in Chroma.
@@ -88,6 +88,8 @@ class AgentState(TypedDict, total=False):
     output: str                      # the answer text
     prompt: str                      # the exact prompt sent to the engine
     used_docs: list[Result]          # the subset that survived the token budget
+    prompt_tokens: int               # what the budget actually spent
+    prompt_tokens_exact: bool        # False => the fallback estimate, not the tokenizer
 
     # --- citations (Step 3) ---
     citations: list[str]
@@ -279,6 +281,7 @@ agent/prompts.py                 Zephyr template, source-marker rendering, token
 agent/nodes.py                   retrieve, synthesize
 agent/graph.py                   build_graph
 agent/cli.py                     python -m agent.cli, --k/--max-new-tokens/--json/--dry-run
+agent/tests/conftest.py          Result fixtures + the fake retriever
 agent/tests/test_state.py
 agent/tests/test_engine.py
 agent/tests/test_nodes.py
@@ -304,6 +307,105 @@ keeping it out of `nodes.py` is the same separation argument the skill makes eve
   `k` is justified by them.
 - Phase 1, 2 and 3 suites stay green (10/10 CPU CTest, 7/7 CUDA CTest, `pytest server/tests`
   now +1, `pytest rag/tests` 123). Phase 4 adds a directory and one endpoint.
+
+## Results (2026-09-03)
+
+`pytest agent/tests` — **34 passed**, 0.6 s, on a CPU-only checkout with no server and no
+corpus. `pytest server/tests` **29 passed** (27 + the two `/tokenize` tests). `pytest
+rag/tests` 123, CPU CTest 10/10, CUDA CTest 17/17 — all unchanged.
+
+Env note for this box: `.venv` (3.10) is the interpreter whose ABI matches
+`build-cuda/python/_atlas_engine*.so` and runs the server; the system 3.11 is the one with
+the Phase 3 stack (chromadb, sentence-transformers) and langgraph, and runs the agent. That
+split is not a workaround — it is the design decision working. The agent talks HTTP to a
+process it cannot import, and neither side needs the other's dependencies.
+
+### The measurement: prompt tokens vs wall time (A6000, `CUDA_VISIBLE_DEVICES=1`)
+
+Query: *"how does flash attention avoid materializing the attention matrix"*, greedy,
+end to end through `python -m agent.cli --json`. Wall time includes ~6.6 s of fixed
+retrieval overhead (MiniLM load + Chroma open), measured separately with `--dry-run`.
+
+| k | prompt tokens | max_new_tokens | wall | generation only | ms/token |
+|---|---|---|---|---|---|
+| 1 | 165 | 64 | 22.4 s | ~15.8 s | ~247 |
+| 2 | 328 | 64 | 35.9 s | ~29.3 s | ~458 |
+| 3 | 529 | 64 | 51.4 s | ~44.8 s | ~700 |
+| **3** | **529** | **32** | **28.9 s** | **~22.3 s** | ~697 |
+| 5 | 834 | 64 | 79.8 s | ~73.2 s | ~1144 |
+
+This is docs/14's "no KV cache" turned into the number that sets a default. Per-token cost
+is not a constant — it is a **function of prompt length**, and it grows roughly linearly in
+it over this range (247 → 1144 ms/token as the prompt goes 165 → 834), because every emitted
+token re-runs the forward pass over the whole sequence. The design said the default `k`
+drops if k=5 costs more than ~30 s. It costs 80 s.
+
+**So the agent's defaults are `k=3`, `max_new_tokens=32` — a 29 s run** — and they live in
+`agent/nodes.py`, deliberately *not* inherited from `rag.retrieve.DEFAULT_K` (5). Retrieval's
+best default and the agent's affordable default are different numbers for different reasons,
+and tying them together would mean one of them is wrong. `--k`/`--max-new-tokens` raise them
+when a question is worth the wait.
+
+### The answers, verbatim
+
+k=3, 32 tokens (the shipped default) — grounded, and traceable to the retrieved chunks:
+
+> FlashAttention avoids materializing the attention matrix by computing attention with
+> respect to each block and rescaling the output, which results in the right answer
+
+k=5, 64 tokens — the same question, more evidence, a *worse* answer:
+
+> FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning (2023) by
+> Yunjung Lee et al. Aims to improve the memory efficiency of attention mechanisms by
+> reducing the number of memory accesses required for the attention computation. The
+> approach involves
+
+It starts reciting a retrieved *title* and then invents an author list that appears in no
+excerpt. That is the second, unbudgeted argument for the lower default: at k=5 the evidence
+block is ~800 tokens of dense related prose in front of a 1.1B model, and it degrades into
+summarising the bibliography instead of answering. More retrieval is not monotonically
+better here, and Step 2's relevance gate now has a concrete failure to aim at.
+
+A second question, k=3, 32 tokens:
+
+> Q: what is a paged kv cache
+> A: A paged KV cache is a fixed-size block of memory that is organized as a series of
+> logical KV blocks, filled from left to right as
+>
+> sources:
+>   [1] Efficient Memory Management for LLM Serving with PagedAttention (2023), p5 [2309.06180:39]
+>   [2] Efficient Memory Management for LLM Serving with PagedAttention (2023), p2 [2309.06180:12]
+>   [3] QLoRA: Efficient Finetuning of Quantized LLMs (2023), p5 [2305.14314:28]
+
+Both answers stop mid-sentence, which is the 32-token budget doing exactly what it says and
+not a bug. Nothing here trims to a sentence boundary yet.
+
+### `--dry-run` and the honest token count
+
+With the server **up**, `--dry-run` reports `834 tokens, exact` — counted by `/tokenize`,
+i.e. by the tokenizer that would have done the encoding. With the server **down** the same
+run reports `628 tokens, ESTIMATED`, retrieves, budgets and renders the prompt in 6.6 s, and
+never calls `/generate`. A real run with the server down ends with
+
+```
+synthesize: engine call failed: POST http://127.0.0.1:8000/generate: [Errno 111] Connection refused
+```
+
+in `reasoning_steps`, the message in `state["error"]`, exit code 1, and no traceback. That is
+the failure mode the step wanted: a graph that finishes and reports, rather than one that
+crashes halfway.
+
+### Two deviations from the design, and why
+
+- **The `/health` cap is read lazily, not in `__init__`.** The design said "at construction".
+  Constructing an `HttpEngineClient` is also what `--dry-run` does on a box with no server,
+  and an eager probe would make the no-server path either slow or fatal. The probe now runs
+  on first use, caches, and falls back to the documented default of 64.
+- **`DryRunEngineClient` is a real class in `agent/engine.py`**, not a flag threaded through
+  the nodes. `--dry-run` then exercises the *shipping* graph and the *shipping* synthesize
+  node; only the `complete` call is swapped. A `if dry_run` branch inside `synthesize` would
+  mean the dry run tests a path the real run never takes.
+
 
 ## Design decisions
 
